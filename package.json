@@ -9,13 +9,34 @@
     "dist"
   ],
   "license": "MIT",
-  "scripts": {},
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:integration": "vitest run tests/integration/plugin.spec.ts"
+  },
   "keywords": [
     "chatbot",
     "koishi",
     "plugin"
   ],
-  "devDependencies": {},
+  "devDependencies": {
+    "@koishijs/plugin-database-memory": "^3.7.0",
+    "@koishijs/plugin-mock": "^2.6.6",
+    "@koishijs/plugin-server": "^3.2.9",
+    "@types/node": "^18.19.0",
+    "typescript": "^5.8.3",
+    "vite": "6.4.3",
+    "vitest": "3.2.6"
+  },
+  "dependencies": {
+    "@takumi-rs/core": "2.1.1",
+    "@takumi-rs/helpers": "2.1.1",
+    "schemastery": "^3.18.0",
+    "sharp": "^0.34.3"
+  },
   "peerDependencies": {
     "koishi": "^4.18.7"
   }

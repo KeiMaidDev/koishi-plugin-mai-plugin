@@ -1,34 +1,39 @@
 import type { Context } from 'koishi'
 import { Config, ConfigSchema } from './config'
 import { INJECTED_SERVICES, PLUGIN_NAME } from './constants'
+import { registerMaiDatabaseModels } from './database/models'
 import type { LifecycleContext, LifecycleSteps, PluginContext } from './types'
 
 export const name = PLUGIN_NAME
 
 export { Config, ConfigSchema }
 export { type LifecycleContext, type LifecycleSteps }
+export * from './database/models'
+export * from './database/repositories'
 
 export const inject = [...INJECTED_SERVICES]
 
 const noOp = () => undefined
 
-const defaultLifecycle: LifecycleSteps = {
-  async verifyNativePackages() {
-    await Promise.all([
-      import('@takumi-rs/core'),
-      import('@takumi-rs/helpers'),
-    ])
-  },
-  initializeDatabaseModels: noOp,
-  initializeDataCache: noOp,
-  initializeProviders: noOp,
-  initializeRenderer: noOp,
-  initializeServices: noOp,
-  initializeRoutes: noOp,
-  initializeCommands: noOp,
-  cancelSyncTasks: noOp,
-  clearWaitingQueue: noOp,
-  releaseCallbackState: noOp,
+function createDefaultLifecycle(ctx: Context): LifecycleSteps {
+  return {
+    async verifyNativePackages() {
+      await Promise.all([
+        import('@takumi-rs/core'),
+        import('@takumi-rs/helpers'),
+      ])
+    },
+    initializeDatabaseModels: () => registerMaiDatabaseModels(ctx),
+    initializeDataCache: noOp,
+    initializeProviders: noOp,
+    initializeRenderer: noOp,
+    initializeServices: noOp,
+    initializeRoutes: noOp,
+    initializeCommands: noOp,
+    cancelSyncTasks: noOp,
+    clearWaitingQueue: noOp,
+    releaseCallbackState: noOp,
+  }
 }
 
 function assertRequiredServices(ctx: PluginContext) {
@@ -64,7 +69,7 @@ function createCleanup(lifecycle: LifecycleSteps) {
 export async function initializePlugin(
   ctx: PluginContext,
   config: Config,
-  lifecycle: LifecycleSteps = defaultLifecycle,
+  lifecycle: LifecycleSteps = createDefaultLifecycle(ctx as Context),
 ) {
   assertRequiredServices(ctx)
 

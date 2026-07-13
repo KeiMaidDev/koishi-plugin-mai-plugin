@@ -10,6 +10,10 @@ export { Config, ConfigSchema }
 export { type LifecycleContext, type LifecycleSteps }
 export * from './database/models'
 export * from './database/repositories'
+export * from './data/cache-store'
+export * from './data/manifest'
+export * from './data/normalizers'
+export * from './data/sync-service'
 
 export const inject = [...INJECTED_SERVICES]
 

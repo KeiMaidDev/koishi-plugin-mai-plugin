@@ -215,6 +215,10 @@ export class AliasRepository {
     return rows.filter(row => row.votes >= 0)
   }
 
+  async allApproved() {
+    return this.ctx.database.get('mai_alias', { votes: { $gte: 0 } })
+  }
+
   async getVotes(musicId: number, name: string) {
     const [row] = await this.ctx.database.get('mai_alias', { musicId, name })
     return row?.votes ?? null

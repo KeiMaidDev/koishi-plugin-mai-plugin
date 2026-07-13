@@ -166,6 +166,29 @@ describe('maimai database models and repositories', () => {
     ])
   })
 
+  it('bulk-lists only approved aliases and reflects promotion and deletion immediately', async () => {
+    await repositories.alias.add(10001, 'Approved Alias')
+    await repositories.alias.vote(10002, 'Pending Alias', 'user-1')
+    const get = vi.spyOn(ctx.database, 'get')
+
+    expect(await repositories.alias.allApproved()).toEqual([
+      expect.objectContaining({ musicId: 10001, name: 'Approved Alias', votes: 0 }),
+    ])
+    expect(get).toHaveBeenLastCalledWith('mai_alias', { votes: { $gte: 0 } })
+
+    await repositories.alias.vote(10002, 'Pending Alias', 'user-2')
+    await repositories.alias.vote(10002, 'Pending Alias', 'user-3')
+    expect(await repositories.alias.allApproved()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ musicId: 10001, name: 'Approved Alias', votes: 0 }),
+      expect.objectContaining({ musicId: 10002, name: 'Pending Alias', votes: 0 }),
+    ]))
+
+    await repositories.alias.remove(10001, 'Approved Alias')
+    expect(await repositories.alias.allApproved()).toEqual([
+      expect.objectContaining({ musicId: 10002, name: 'Pending Alias', votes: 0 }),
+    ])
+  })
+
   it('promotes an existing pending alias when it is added directly', async () => {
     await repositories.alias.vote(10003, 'Promoted Alias', 'user-1')
 

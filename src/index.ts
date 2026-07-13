@@ -19,6 +19,12 @@ export * from './providers/errors'
 export * from './providers/diving-fish'
 export * from './providers/lxns'
 export * from './providers/provider-chain'
+export * from './query/filter-types'
+export * from './query/combo-parser'
+export * from './query/combo-rules'
+export * from './query/combo-executor'
+export * from './services/alias-service'
+export * from './utils/strings'
 
 export const inject = [...INJECTED_SERVICES]
 

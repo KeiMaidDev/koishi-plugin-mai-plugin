@@ -1,0 +1,51 @@
+{
+  "revision": "providers-r1",
+  "versions": [
+    { "id": 1, "name": "maimai DX", "version": 1 }
+  ],
+  "musics": [
+    {
+      "id": 1,
+      "name": "Equivalent Standard",
+      "type": "SD",
+      "rights": "",
+      "artist": "Fixture Artist",
+      "genre": "maimai",
+      "bpm": 180,
+      "version": "maimai DX",
+      "isNew": false,
+      "charts": [
+        {
+          "difficulty": 0,
+          "level": "5",
+          "levelValue": 5,
+          "notes": [10, 5, 2, 1, 1],
+          "notesDesigner": "Fixture"
+        }
+      ]
+    },
+    {
+      "id": 10002,
+      "name": "Equivalent Deluxe",
+      "type": "DX",
+      "rights": "",
+      "artist": "Fixture Artist",
+      "genre": "maimai",
+      "bpm": 190,
+      "version": "maimai DX",
+      "isNew": true,
+      "charts": [
+        {
+          "difficulty": 0,
+          "level": "6",
+          "levelValue": 6,
+          "notes": [12, 6, 3, 2, 1],
+          "notesDesigner": "Fixture"
+        }
+      ]
+    }
+  ],
+  "plates": [],
+  "icons": [],
+  "courses": []
+}

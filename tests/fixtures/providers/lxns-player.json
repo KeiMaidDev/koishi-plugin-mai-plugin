@@ -1,0 +1,40 @@
+{
+  "success": true,
+  "code": 200,
+  "message": "ok",
+  "data": {
+    "name": "Fixture Player",
+    "rating": 12345,
+    "friend_code": 987654321,
+    "course_rank": 13,
+    "class_rank": 5,
+    "star": 10,
+    "icon": {
+      "id": 101,
+      "name": "Fixture Icon",
+      "color": "#ffffff",
+      "description": null,
+      "genre": "icon",
+      "required": [
+        {
+          "difficulties": [0],
+          "rate": "sssp",
+          "fc": "app",
+          "fs": "fsdp",
+          "songs": [
+            {
+              "id": 1,
+              "title": "Equivalent Standard",
+              "type": "standard",
+              "completed": true,
+              "completed_difficulties": [0]
+            }
+          ],
+          "completed": true
+        }
+      ]
+    },
+    "name_plate": { "id": 202, "name": "Fixture Plate" },
+    "frame": null
+  }
+}

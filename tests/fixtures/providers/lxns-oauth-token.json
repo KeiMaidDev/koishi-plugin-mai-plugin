@@ -1,0 +1,12 @@
+{
+  "success": true,
+  "code": 200,
+  "message": "ok",
+  "data": {
+    "access_token": "fixture-access-token",
+    "token_type": "Bearer",
+    "expires_in": 3600,
+    "refresh_token": "fixture-refresh-token",
+    "scope": "maimai"
+  }
+}

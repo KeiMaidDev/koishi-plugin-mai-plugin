@@ -1,0 +1,14 @@
+{
+  "divingFish": {
+    "fractionalNote": 2.5,
+    "fractionalBpm": 180.5,
+    "unsafeInteger": 9007199254740992,
+    "invalidType": "UTAGE",
+    "invalidCombo": "perfect"
+  },
+  "lxns": {
+    "invalidCollectionColor": 123,
+    "fractionalDifficulty": 0.5,
+    "invalidTimestamp": 12345
+  }
+}

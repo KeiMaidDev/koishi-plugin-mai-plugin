@@ -1,0 +1,43 @@
+{
+  "username": "fixture-user",
+  "rating": 12345,
+  "additional_rating": 12,
+  "nickname": "Fixture Player",
+  "plate": null,
+  "charts": {
+    "sd": [
+      {
+        "achievements": 100.5,
+        "ds": 5,
+        "dxScore": 57,
+        "fc": "app",
+        "fs": "fsdp",
+        "level": "5",
+        "level_index": 0,
+        "level_label": "Basic",
+        "ra": 112,
+        "rate": "sssp",
+        "song_id": 1,
+        "title": "Equivalent Standard",
+        "type": "SD"
+      }
+    ],
+    "dx": [
+      {
+        "achievements": 99.5,
+        "ds": 6,
+        "dxScore": 72,
+        "fc": "fc",
+        "fs": "fs",
+        "level": "6",
+        "level_index": 0,
+        "level_label": "Basic",
+        "ra": 125,
+        "rate": "ssp",
+        "song_id": 10002,
+        "title": "Equivalent Deluxe",
+        "type": "DX"
+      }
+    ]
+  }
+}

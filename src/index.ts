@@ -14,6 +14,11 @@ export * from './data/cache-store'
 export * from './data/manifest'
 export * from './data/normalizers'
 export * from './data/sync-service'
+export * from './providers/types'
+export * from './providers/errors'
+export * from './providers/diving-fish'
+export * from './providers/lxns'
+export * from './providers/provider-chain'
 
 export const inject = [...INJECTED_SERVICES]
 

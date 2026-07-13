@@ -1,9 +1,9 @@
 import { readFile, rm } from 'node:fs/promises'
 import { basename, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import sharp from 'sharp'
 import type { Config } from '../config'
 import type { GameVersion, MusicInfo } from '../domain/music'
+import { resolvePackageAssetPath } from '../render/assets'
 import { CacheStore, type CachedSnapshot } from './cache-store'
 import { inspectFile, parseResourceManifest, type ResourceManifest, type ResourceManifestFile } from './manifest'
 import {
@@ -15,9 +15,9 @@ import {
 } from './normalizers'
 
 const DEFAULT_PROBER_DATA_URL = 'https://www.diving-fish.com/api/maimaidxprober/music_data'
-const FALLBACK_COVER = fileURLToPath(new URL('../../assets/fallback/cover.png', import.meta.url))
-const FALLBACK_AVATAR = fileURLToPath(new URL('../../assets/fallback/avatar.png', import.meta.url))
-const FALLBACK_PLATE = fileURLToPath(new URL('../../assets/fallback/plate.png', import.meta.url))
+const FALLBACK_COVER = resolvePackageAssetPath('fallback/cover.png')
+const FALLBACK_AVATAR = resolvePackageAssetPath('fallback/avatar.png')
+const FALLBACK_PLATE = resolvePackageAssetPath('fallback/plate.png')
 
 const BUILTIN_SOURCE = {
   revision: 'builtin-minimal-v1',
@@ -57,6 +57,17 @@ export interface MaimaiDataSyncOptions {
   builtinSource?: unknown | null
 }
 
+export interface MaimaiAssetInvalidationEvent {
+  revision: string
+  paths: readonly string[]
+}
+
+export type MaimaiAssetInvalidationListener = (event: MaimaiAssetInvalidationEvent) => void
+
+export interface MaimaiAssetInvalidationSource {
+  onAssetInvalidation(listener: MaimaiAssetInvalidationListener): () => void
+}
+
 export class MissingMaimaiDataError extends Error {
   constructor(readonly missing: string[], causes: unknown[] = []) {
     const details = causes.length
@@ -82,12 +93,14 @@ export class MaimaiDataStore {
   private readonly coverThumbnails = new Map<number, string>()
   private readonly avatars = new Map<number, string>()
   private readonly plateImages = new Map<number, string>()
+  readonly assetPaths: readonly string[]
 
   constructor(
     data: NormalizedMaimaiSource,
     readonly manifest: ResourceManifest,
     files: Map<string, string>,
   ) {
+    this.assetPaths = Object.freeze([...files.values()])
     this.versions = data.versions
     this.musics = data.musics
     this.plates = data.plates
@@ -141,12 +154,14 @@ function ensureBaseUrl(value: string, validateUrl: (url: URL) => void) {
   return url
 }
 
-export class MaimaiDataSyncService {
+export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
   private readonly logger: DataSyncLogger
   private readonly cache: CacheStore
   private readonly proberDataUrl: string
   private readonly builtinSource: unknown | null
   private readonly validateRemoteUrl: (url: URL) => void
+  private readonly assetInvalidationListeners = new Set<MaimaiAssetInvalidationListener>()
+  private publishedAssetPaths = new Set<string>()
 
   constructor(private readonly options: MaimaiDataSyncOptions) {
     this.logger = options.logger ?? console
@@ -154,6 +169,30 @@ export class MaimaiDataSyncService {
     this.proberDataUrl = options.proberDataUrl === undefined ? DEFAULT_PROBER_DATA_URL : options.proberDataUrl
     this.builtinSource = options.builtinSource === undefined ? BUILTIN_SOURCE : options.builtinSource
     this.validateRemoteUrl = createRemoteUrlValidator(options.config.allowedHosts)
+  }
+
+  onAssetInvalidation(listener: MaimaiAssetInvalidationListener): () => void {
+    this.assetInvalidationListeners.add(listener)
+    return () => {
+      this.assetInvalidationListeners.delete(listener)
+    }
+  }
+
+  private complete(store: MaimaiDataStore) {
+    const currentPaths = new Set(store.assetPaths)
+    const affectedPaths = Object.freeze([...new Set([
+      ...this.publishedAssetPaths,
+      ...currentPaths,
+    ])])
+    this.publishedAssetPaths = currentPaths
+    if (affectedPaths.length) {
+      const event = Object.freeze({
+        revision: store.manifest.revision,
+        paths: affectedPaths,
+      })
+      for (const listener of this.assetInvalidationListeners) listener(event)
+    }
+    return store
   }
 
   private async generateCoverThumbnails(
@@ -272,14 +311,14 @@ export class MaimaiDataSyncService {
     if (this.options.config.enabled) {
       if (this.options.config.staticBaseUrl) {
         try {
-          return await this.syncStaticSource()
+          return this.complete(await this.syncStaticSource())
         } catch (error) {
           remoteErrors.push(error)
         }
       }
       if (this.proberDataUrl) {
         try {
-          return await this.syncProberSource()
+          return this.complete(await this.syncProberSource())
         } catch (error) {
           remoteErrors.push(error)
         }
@@ -291,14 +330,14 @@ export class MaimaiDataSyncService {
       if (remoteErrors.length) {
         this.logger.warn(`[mai-plugin] resource synchronization failed; using cached revision ${cached.manifest.revision}`)
       }
-      return await this.storeFromCache(cached)
+      return this.complete(await this.storeFromCache(cached))
     } catch (cacheError) {
       try {
         const store = await this.storeBuiltinSource()
         if (remoteErrors.length) {
           this.logger.warn('[mai-plugin] resource sources are unavailable; using builtin minimum data')
         }
-        return store
+        return this.complete(store)
       } catch (builtinError) {
         throw new MissingMaimaiDataError(
           ['versions', 'musics'],

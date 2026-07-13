@@ -1,8 +1,13 @@
 import type { Context } from 'koishi'
 import { Config, ConfigSchema } from './config'
 import { INJECTED_SERVICES, PLUGIN_NAME } from './constants'
+import { MaimaiDataSyncService, type MaimaiDataSyncOptions } from './data/sync-service'
 import { registerMaiDatabaseModels } from './database/models'
-import type { LifecycleContext, LifecycleSteps, PluginContext } from './types'
+import {
+  connectDataSyncAssetInvalidation,
+  TakumiRenderService,
+} from './render/renderer'
+import type { Awaitable, LifecycleContext, LifecycleSteps, PluginContext } from './types'
 
 export const name = PLUGIN_NAME
 
@@ -24,13 +29,62 @@ export * from './query/combo-parser'
 export * from './query/combo-rules'
 export * from './query/combo-executor'
 export * from './services/alias-service'
+export * from './render/assets'
+export * from './render/nodes'
+export * from './render/renderer'
+export * from './render/theme'
+export * from './utils/semaphore'
 export * from './utils/strings'
 
 export const inject = [...INJECTED_SERVICES]
 
 const noOp = () => undefined
 
-function createDefaultLifecycle(ctx: Context): LifecycleSteps {
+export interface DefaultLifecycleDependencies {
+  initializeDatabaseModels(ctx: Context): Awaitable<void>
+  createRenderer(options: Config['render']): TakumiRenderService
+  createDataSync(options: MaimaiDataSyncOptions): MaimaiDataSyncService
+}
+
+interface DefaultRuntimeState {
+  renderer?: TakumiRenderService
+  dataSync?: MaimaiDataSyncService
+  disconnectInvalidation?: () => void
+}
+
+const defaultRuntimeStates = new WeakMap<object, DefaultRuntimeState>()
+
+const defaultLifecycleDependencies: DefaultLifecycleDependencies = {
+  initializeDatabaseModels: ctx => registerMaiDatabaseModels(ctx),
+  createRenderer: options => new TakumiRenderService(options),
+  createDataSync: options => new MaimaiDataSyncService(options),
+}
+
+export function getTakumiRenderService(ctx: object) {
+  const renderer = defaultRuntimeStates.get(ctx)?.renderer
+  if (!renderer) throw new Error('[mai-plugin] renderer service is not initialized')
+  return renderer
+}
+
+export function getMaimaiDataSyncService(ctx: object) {
+  const dataSync = defaultRuntimeStates.get(ctx)?.dataSync
+  if (!dataSync) throw new Error('[mai-plugin] data sync service is not initialized')
+  return dataSync
+}
+
+export function createDefaultLifecycle(
+  ctx: Context,
+  overrides: Partial<DefaultLifecycleDependencies> = {},
+): LifecycleSteps {
+  const dependencies = { ...defaultLifecycleDependencies, ...overrides }
+  const state = defaultRuntimeStates.get(ctx) ?? {}
+  defaultRuntimeStates.set(ctx, state)
+
+  const ensureDataSync = (runtime: LifecycleContext) => {
+    state.dataSync ??= dependencies.createDataSync({ config: runtime.config.resourceSync })
+    return state.dataSync
+  }
+
   return {
     async verifyNativePackages() {
       await Promise.all([
@@ -38,16 +92,29 @@ function createDefaultLifecycle(ctx: Context): LifecycleSteps {
         import('@takumi-rs/helpers'),
       ])
     },
-    initializeDatabaseModels: () => registerMaiDatabaseModels(ctx),
-    initializeDataCache: noOp,
+    initializeDatabaseModels: () => dependencies.initializeDatabaseModels(ctx),
+    initializeDataCache(runtime) {
+      ensureDataSync(runtime)
+    },
     initializeProviders: noOp,
-    initializeRenderer: noOp,
+    async initializeRenderer(runtime) {
+      const dataSync = ensureDataSync(runtime)
+      state.renderer ??= dependencies.createRenderer(runtime.config.render)
+      await state.renderer.initialize()
+      state.disconnectInvalidation ??= connectDataSyncAssetInvalidation(dataSync, state.renderer)
+    },
     initializeServices: noOp,
     initializeRoutes: noOp,
     initializeCommands: noOp,
     cancelSyncTasks: noOp,
-    clearWaitingQueue: noOp,
-    releaseCallbackState: noOp,
+    clearWaitingQueue() {
+      state.renderer?.clearWaitingQueue(new Error('[mai-plugin] renderer queue cleared'))
+    },
+    releaseCallbackState() {
+      state.disconnectInvalidation?.()
+      state.disconnectInvalidation = undefined
+      defaultRuntimeStates.delete(ctx)
+    },
   }
 }
 
@@ -84,32 +151,33 @@ function createCleanup(lifecycle: LifecycleSteps) {
 export async function initializePlugin(
   ctx: PluginContext,
   config: Config,
-  lifecycle: LifecycleSteps = createDefaultLifecycle(ctx as Context),
+  lifecycle?: LifecycleSteps,
 ) {
   assertRequiredServices(ctx)
+  const activeLifecycle = lifecycle ?? createDefaultLifecycle(ctx as Context)
 
   const runtime: LifecycleContext = {
     config,
     publicBaseUrl: config.publicBaseUrl || ctx.server?.selfUrl || '',
   }
-  const cleanup = createCleanup(lifecycle)
+  const cleanup = createCleanup(activeLifecycle)
   ctx.on('dispose', cleanup)
 
   try {
-    await lifecycle.verifyNativePackages(runtime)
+    await activeLifecycle.verifyNativePackages(runtime)
   } catch {
     await cleanup()
     throw new Error('[mai-plugin] Takumi native packages are unavailable. Reinstall @takumi-rs/core and @takumi-rs/helpers.')
   }
 
   try {
-    await lifecycle.initializeDatabaseModels(runtime)
-    await lifecycle.initializeDataCache(runtime)
-    await lifecycle.initializeProviders(runtime)
-    await lifecycle.initializeRenderer(runtime)
-    await lifecycle.initializeServices(runtime)
-    await lifecycle.initializeRoutes(runtime)
-    await lifecycle.initializeCommands(runtime)
+    await activeLifecycle.initializeDatabaseModels(runtime)
+    await activeLifecycle.initializeDataCache(runtime)
+    await activeLifecycle.initializeProviders(runtime)
+    await activeLifecycle.initializeRenderer(runtime)
+    await activeLifecycle.initializeServices(runtime)
+    await activeLifecycle.initializeRoutes(runtime)
+    await activeLifecycle.initializeCommands(runtime)
   } catch (error) {
     await cleanup()
     throw error

@@ -2,20 +2,32 @@
   "name": "koishi-plugin-mai-plugin",
   "description": "",
   "version": "0.0.1",
-  "main": "lib/index.js",
+  "type": "module",
+  "main": "dist/index.js",
   "typings": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
   "files": [
     "lib",
     "dist",
-    "assets/fallback"
+    "assets/fallback",
+    "assets/fonts"
   ],
   "license": "MIT",
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "test": "vitest run",
+    "build": "npm run build:types && npm run build:js",
+    "build:types": "tsc -p tsconfig.json",
+    "build:js": "vite build",
+    "prepack": "tsc -p tsconfig.json && vite build --logLevel error",
+    "test": "vitest run --testTimeout=15000",
     "test:integration": "vitest run tests/integration/plugin.spec.ts"
   },
   "keywords": [

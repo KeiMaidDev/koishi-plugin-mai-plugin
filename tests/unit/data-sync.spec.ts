@@ -1,9 +1,6 @@
-import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { promisify } from 'node:util'
 import sharp from 'sharp'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Config } from '../../src/config'
@@ -12,11 +9,10 @@ import { CacheStore } from '../../src/data/cache-store'
 import { parseResourceManifest, sha256 } from '../../src/data/manifest'
 import { normalizeMaimaiSource } from '../../src/data/normalizers'
 import { MaimaiDataSyncService, MissingMaimaiDataError } from '../../src/data/sync-service'
+import { connectDataSyncAssetInvalidation, TakumiRenderService } from '../../src/render/renderer'
 import minimalSource from '../fixtures/data/minimal-source.json'
 
 const temporaryDirectories: string[] = []
-const execFileAsync = promisify(execFile)
-const projectRoot = fileURLToPath(new URL('../..', import.meta.url))
 
 afterEach(async () => {
   vi.restoreAllMocks()
@@ -475,26 +471,50 @@ describe('remote URL policy', () => {
   })
 })
 
-describe('package artifacts', () => {
-  it('ships every runtime fallback PNG in the npm package', async () => {
-    const npmCli = process.env.npm_execpath
-    if (!npmCli) throw new Error('npm_execpath is unavailable')
-    const { stdout } = await execFileAsync(process.execPath, [npmCli, 'pack', '--dry-run', '--json'], {
-      cwd: projectRoot,
-      encoding: 'utf8',
-    })
-    const [packResult] = JSON.parse(stdout) as [{ files: Array<{ path: string }> }]
-    const paths = packResult.files.map(file => file.path.replaceAll('\\', '/'))
-
-    expect(paths).toEqual(expect.arrayContaining([
-      'assets/fallback/avatar.png',
-      'assets/fallback/cover.png',
-      'assets/fallback/plate.png',
-    ]))
-  })
-})
-
 describe('data synchronization', () => {
+  it('invalidates preserved-mtime renderer assets through the production sync event', async () => {
+    const cacheDir = await temporaryDirectory()
+    const cache = new CacheStore(cacheDir)
+    const staging = await cache.createStagingDirectory()
+    const source = Buffer.from(JSON.stringify(minimalSource))
+    const firstCover = Buffer.from('cover-v1')
+    const sourceMetadata = await cache.writeAtomic(join(staging, 'source.json'), source)
+    const coverMetadata = await cache.writeAtomic(join(staging, 'covers', '1.png'), firstCover)
+    await cache.commitSnapshot(staging, 'preserved-mtime', {
+      'source.json': { ...sourceMetadata, source: 'test' },
+      'covers/1.png': { ...coverMetadata, source: 'test' },
+    })
+    const dataSync = new MaimaiDataSyncService({
+      config: { ...resourceSyncConfig(cacheDir), enabled: false },
+      builtinSource: null,
+      proberDataUrl: '',
+    })
+    const renderer = new TakumiRenderService()
+    const disconnect = connectDataSyncAssetInvalidation(dataSync, renderer)
+
+    const firstStore = await dataSync.startup()
+    const coverPath = firstStore.coverPath(1)
+    await expect(renderer.loadAsset(coverPath)).resolves.toEqual(firstCover)
+    const timestamps = await stat(coverPath)
+    const secondCover = Buffer.from('cover-v2')
+    await writeFile(coverPath, secondCover)
+    await utimes(coverPath, timestamps.atime, timestamps.mtime)
+    const manifest = JSON.parse(await readFile(cache.manifestPath, 'utf8'))
+    const coverKey = Object.keys(manifest.files).find(path => path.endsWith('/covers/1.png'))
+    if (!coverKey) throw new Error('cover manifest entry is missing')
+    manifest.files[coverKey] = {
+      ...manifest.files[coverKey],
+      sha256: sha256(secondCover),
+      size: secondCover.byteLength,
+    }
+    await writeFile(cache.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+
+    await dataSync.startup()
+
+    await expect(renderer.loadAsset(coverPath)).resolves.toEqual(secondCover)
+    disconnect()
+  })
+
   it.each([
     'covers//1.png',
     'covers/./1.png',

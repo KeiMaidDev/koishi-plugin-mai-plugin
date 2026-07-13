@@ -1,14 +1,38 @@
 import type { Context } from 'koishi'
 import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { Renderer } from '@takumi-rs/core'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ConfigSchema,
+  createDefaultLifecycle,
+  getMaimaiDataSyncService,
+  getTakumiRenderService,
   inject,
   initializePlugin,
+  MaimaiDataSyncService,
+  TakumiRenderService,
   type Config,
   type LifecycleContext,
   type LifecycleSteps,
 } from '../../src'
+
+const temporaryDirectories: string[] = []
+
+afterEach(async () => {
+  vi.restoreAllMocks()
+  await Promise.all(temporaryDirectories.splice(0).map(directory =>
+    rm(directory, { recursive: true, force: true }),
+  ))
+})
+
+async function temporaryDirectory() {
+  const directory = await mkdtemp(join(tmpdir(), 'mai-plugin-runtime-'))
+  temporaryDirectories.push(directory)
+  return directory
+}
 
 const config: Config = {
   developerTokens: {
@@ -241,5 +265,70 @@ describe('maimai plugin lifecycle', () => {
       'clear-waiting-queue',
       'release-callback-state',
     ])
+  })
+
+  it('default lifecycle owns one initialized renderer and clears it on dispose', async () => {
+    const { context, disposeHandlers } = createContext({ database: {}, server: {} })
+    const cacheDir = await temporaryDirectory()
+    const registerFont = vi.spyOn(Renderer.prototype, 'registerFont')
+    const clearWaitingQueue = vi.spyOn(TakumiRenderService.prototype, 'clearWaitingQueue')
+    const createRenderer = vi.fn((options: Config['render']) => new TakumiRenderService(options))
+    const fetcher = vi.fn(async () => {
+      throw new Error('default lifecycle must not fetch during initialization')
+    }) as unknown as typeof fetch
+    const createDataSync = vi.fn((options: ConstructorParameters<typeof MaimaiDataSyncService>[0]) =>
+      new MaimaiDataSyncService({
+        ...options,
+        config: { ...options.config, enabled: false, cacheDir },
+        fetch: fetcher,
+        proberDataUrl: '',
+      }))
+    const lifecycle = createDefaultLifecycle(context, {
+      initializeDatabaseModels: () => undefined,
+      createRenderer,
+      createDataSync,
+    })
+
+    await initializePlugin(context, config, lifecycle)
+    const renderer = getTakumiRenderService(context)
+    const dataSync = getMaimaiDataSyncService(context)
+    const invalidateAssets = vi.spyOn(renderer, 'invalidateAssets')
+    await lifecycle.initializeRenderer({ config, publicBaseUrl: '' })
+    await dataSync.startup()
+
+    expect(renderer).toBe(getTakumiRenderService(context))
+    expect(dataSync).toBe(getMaimaiDataSyncService(context))
+    expect(createRenderer).toHaveBeenCalledTimes(1)
+    expect(createDataSync).toHaveBeenCalledTimes(1)
+    expect(registerFont).toHaveBeenCalledTimes(2)
+    expect(fetcher).not.toHaveBeenCalled()
+    expect(invalidateAssets).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.stringMatching(/source\.json$/),
+    ]))
+
+    await disposeHandlers[0]()
+
+    expect(clearWaitingQueue).toHaveBeenCalledTimes(1)
+    expect(() => getTakumiRenderService(context)).toThrow('renderer service is not initialized')
+    expect(() => getMaimaiDataSyncService(context)).toThrow('data sync service is not initialized')
+  }, 60_000)
+
+  it('default lifecycle clears and releases a renderer whose initialization fails', async () => {
+    const { context } = createContext({ database: {}, server: {} })
+    const renderer = new TakumiRenderService()
+    const initialize = vi.spyOn(renderer, 'initialize').mockRejectedValue(new Error('font init failed'))
+    const clearWaitingQueue = vi.spyOn(renderer, 'clearWaitingQueue')
+    const createRenderer = vi.fn(() => renderer)
+    const lifecycle = createDefaultLifecycle(context, {
+      initializeDatabaseModels: () => undefined,
+      createRenderer,
+    })
+
+    await expect(initializePlugin(context, config, lifecycle)).rejects.toThrow('font init failed')
+
+    expect(initialize).toHaveBeenCalledTimes(1)
+    expect(createRenderer).toHaveBeenCalledTimes(1)
+    expect(clearWaitingQueue).toHaveBeenCalledTimes(1)
+    expect(() => getTakumiRenderService(context)).toThrow('renderer service is not initialized')
   })
 })

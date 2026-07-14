@@ -1,6 +1,6 @@
 import memory from '@koishijs/plugin-database-memory'
 import mock from '@koishijs/plugin-mock'
-import { Context } from '@koishijs/core'
+import { Context, Universal } from '@koishijs/core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as plugin from '../../src'
 
@@ -277,6 +277,27 @@ describe('core maimai commands', () => {
     await client.shouldReply(`/mai 正则查歌 ${'a'.repeat(plugin.MAX_USER_REGEX_LENGTH + 1)}`, /过长/)
   })
 
+  it('times out nested-alternation regexes without blocking the event loop', async () => {
+    const dependencies = createDependencies()
+    const music = createMusicFixture()
+    Object.defineProperty(music, 'name', { value: 'a'.repeat(32) })
+    dependencies.data.musics = new Map([[music.id, music]])
+    const app = await createApp(dependencies)
+    const client = app.mock.client('10001')
+    let heartbeats = 0
+    const heartbeat = setInterval(() => heartbeats++, 5)
+    const startedAt = performance.now()
+
+    try {
+      await client.shouldReply('/mai 正则查歌 ^((.|..))+Z$', /执行超时/)
+    } finally {
+      clearInterval(heartbeat)
+    }
+
+    expect(performance.now() - startedAt).toBeLessThan(500)
+    expect(heartbeats).toBeGreaterThan(0)
+  })
+
   it('uses opaque scoped Task 10 pagination callbacks', async () => {
     const dependencies = createDependencies()
     const base = createMusicFixture()
@@ -310,6 +331,87 @@ describe('core maimai commands', () => {
     })).resolves.toMatchObject({ ok: true, kind: 'pagination' })
   })
 
+  it('rejects search threshold plus one before capturing pagination callbacks', async () => {
+    const dependencies = createDependencies()
+    const results = Array.from({ length: plugin.SEARCH_TOO_MANY + 1 }, (_, index) => {
+      const music = createMusicFixture()
+      Object.defineProperties(music, {
+        id: { value: 5_000 + index },
+        name: { value: `Oversized Result ${index + 1}` },
+      })
+      return music
+    })
+    dependencies.aliasService.search.mockResolvedValueOnce(results)
+    const registerPagination = vi.spyOn(dependencies.callbackRouter, 'registerPagination')
+    const app = await createApp(dependencies)
+    const client = app.mock.client('10001')
+
+    await client.shouldReply(
+      '/mai 查歌 oversized',
+      '在当前条件下查询到的曲目过多，请缩小范围。',
+    )
+    expect(registerPagination).not.toHaveBeenCalled()
+  })
+
+  it('dispatches scoped callback results through interaction/button and unregisters on dispose', async () => {
+    const dependencies = createDependencies()
+    const app = await createApp(dependencies)
+    const handler = vi.fn(() => 'rendered callback page')
+    const token = dependencies.callbackRouter.register({
+      kind: 'integration',
+      payload: { page: 2 },
+      expectedUserId: '10001',
+      expectedChannelId: 'channel-a',
+      requiredAuthority: 4,
+      requiredPermission: 'mai.callback',
+      handler,
+    })
+    const emitButton = async (
+      userId: string,
+      channelId: string,
+      authority: number,
+      permissions: string[],
+    ) => {
+      const client = app.mock.client(userId, channelId)
+      const session = client.bot.session({
+        type: 'interaction/button',
+        user: { id: userId },
+        channel: { id: channelId, type: Universal.Channel.Type.TEXT },
+        button: { id: token },
+      })
+      session.user = { authority, permissions } as never
+      session.permissions = permissions
+      session['client'] = client
+      const flush = vi.spyOn(client, 'flush')
+      client.bot.dispatch(session)
+      await new Promise(resolve => setImmediate(resolve))
+      await new Promise(resolve => setImmediate(resolve))
+      return flush
+    }
+
+    expect(await emitButton('other', 'channel-a', 4, ['mai.callback'])).not.toHaveBeenCalled()
+    expect(await emitButton('10001', 'channel-b', 4, ['mai.callback'])).not.toHaveBeenCalled()
+    expect(await emitButton('10001', 'channel-a', 3, ['mai.callback'])).not.toHaveBeenCalled()
+    expect(await emitButton('10001', 'channel-a', 4, [])).not.toHaveBeenCalled()
+    const authorizedSend = await emitButton('10001', 'channel-a', 4, ['mai.callback'])
+    expect(handler).toHaveBeenCalledWith(
+      { page: 2 },
+      expect.objectContaining({
+        userId: '10001',
+        channelId: 'channel-a',
+        authority: 4,
+        permissions: ['mai.callback'],
+      }),
+    )
+    expect(authorizedSend).toHaveBeenCalledWith('rendered callback page')
+
+    const dispatch = vi.spyOn(dependencies.callbackRouter, 'dispatch')
+    dispatch.mockClear()
+    Reflect.get(app, '__coreRegistration').dispose()
+    await emitButton('10001', 'channel-a', 4, ['mai.callback'])
+    expect(dispatch).not.toHaveBeenCalled()
+  })
+
   it('votes aliases and restricts deletion to administrators', async () => {
     const dependencies = createDependencies()
     const app = await createApp(dependencies)
@@ -325,14 +427,33 @@ describe('core maimai commands', () => {
     expect(dependencies.aliasService.remove).toHaveBeenCalledWith(1001, '测试别名')
   })
 
-  it('keeps daily recommendations stable for user and local date', async () => {
-    const app = await createApp()
-    const client = app.mock.client('10001')
+  it('keys daily recommendations by user and local calendar date', async () => {
+    const dependencies = createDependencies()
+    dependencies.data.musics = new Map(Array.from({ length: 12 }, (_, index) => {
+      const music = createMusicFixture()
+      Object.defineProperties(music, {
+        id: { value: 6_000 + index },
+        name: { value: `Daily Song ${index + 1}` },
+      })
+      return [music.id, music]
+    }))
+    let now = new Date(2026, 6, 14, 23, 59, 0)
+    dependencies.now = () => now
+    const app = await createApp(dependencies)
+    const firstUser = app.mock.client('10001')
+    const secondUser = app.mock.client('10002')
 
-    const first = await client.receive('/mai 今日舞萌')
-    const second = await client.receive('/mai 今日舞萌')
-    expect(first).toEqual(second)
-    expect(first[0]).toMatch(/1001\. Test Song/)
+    const first = await firstUser.receive('/mai 今日舞萌')
+    const repeated = await firstUser.receive('/mai 今日舞萌')
+    const otherUser = await secondUser.receive('/mai 今日舞萌')
+    now = new Date(2026, 6, 15, 0, 1, 0)
+    const nextDate = await firstUser.receive('/mai 今日舞萌')
+
+    expect(repeated).toEqual(first)
+    expect(first[0]).toContain('2026-07-14')
+    expect(otherUser).not.toEqual(first)
+    expect(nextDate).not.toEqual(first)
+    expect(nextDate[0]).toContain('2026-07-15')
   })
 
   it('reports daily recommendation failure when local music data is empty', async () => {
@@ -369,6 +490,63 @@ describe('core maimai commands', () => {
     expect(dependencies.renderer.renderRating).toHaveBeenCalled()
   })
 
+  it.each([
+    ['b15', 0, 15, 3_880, '[Diving Fish] B0 0 + B15 2880 + COURSE 1000 = 3880'],
+    ['b25', 10, 15, 5_800, '[Diving Fish] B10 1920 + B15 2880 + COURSE 1000 = 5800'],
+    ['b35', 20, 15, 7_720, '[Diving Fish] B20 3840 + B15 2880 + COURSE 1000 = 7720'],
+    ['b40', 25, 15, 8_680, '[Diving Fish] B25 4800 + B15 2880 + COURSE 1000 = 8680'],
+    ['b50', 35, 15, 15_000, '[Diving Fish] B35 10500 + B15 4500 = 15000'],
+  ])(
+    'preserves historical rating semantics for %s',
+    async (trigger, oldCount, newCount, rating, title) => {
+      const dependencies = createDependencies()
+      const oldMusic = createMusicFixture()
+      Object.defineProperties(oldMusic, {
+        id: { value: 2_001 },
+        isNew: { value: false },
+      })
+      const newMusic = createMusicFixture()
+      Object.defineProperty(newMusic, 'id', { value: 2_002 })
+      const makeRecord = (music: plugin.MusicInfo) => new plugin.RecordEntry(
+        music,
+        music.charts[3],
+        1_005_000,
+        plugin.ComboStatus.FullCombo,
+        plugin.SyncStatus.FullSync,
+        300,
+        plugin.Rate.get(1_005_000),
+        300,
+      )
+      dependencies.queryService.rating.mockResolvedValueOnce({
+        response: new plugin.RatingResponse(
+          new plugin.PlayerInfo('Tester', 15_000, 1),
+          null,
+          Array.from({ length: 35 }, () => makeRecord(oldMusic)),
+          Array.from({ length: 15 }, () => makeRecord(newMusic)),
+        ),
+        provider: { id: 'diving-fish', name: 'Diving Fish' },
+      })
+      const app = await createApp(dependencies)
+      const client = app.mock.client('10001')
+
+      await client.shouldReply(`/mai ${trigger}`, /<img/)
+
+      expect(dependencies.renderer.renderRating).toHaveBeenCalledWith(expect.objectContaining({
+        oldCount,
+        newCount,
+        rating,
+        title,
+        oldLabel: `BEST ${oldCount}`,
+        newLabel: `NEW ${newCount}`,
+      }))
+      const input = dependencies.renderer.renderRating.mock.calls[0][0]
+      expect(input.oldRecords).toHaveLength(oldCount)
+      expect(input.newRecords).toHaveLength(newCount)
+      expect(input.oldRecords.every(record => record.rating === (trigger === 'b50' ? 300 : 192))).toBe(true)
+      expect(input.newRecords.every(record => record.rating === (trigger === 'b50' ? 300 : 192))).toBe(true)
+    },
+  )
+
   it('maps rating query failures without invoking the renderer', async () => {
     const dependencies = createDependencies()
     dependencies.queryService.rating.mockRejectedValueOnce(new Error('provider failed'))
@@ -376,6 +554,43 @@ describe('core maimai commands', () => {
     const client = app.mock.client('10001')
 
     expect(await client.receive('/mai b50')).toHaveLength(1)
+    expect(dependencies.renderer.renderRating).not.toHaveBeenCalled()
+  })
+
+  it('marks mentions of the current bot as self mentions', async () => {
+    const dependencies = createDependencies()
+    const app = await createApp(dependencies)
+    const client = app.mock.client('10001')
+
+    await client.receive('/mai b50 <at id="514"/>')
+
+    expect(dependencies.queryService.getQueryParams).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mentions: [expect.objectContaining({
+          userId: '514',
+          isBot: true,
+          isSelf: true,
+        })],
+      }),
+      expect.any(String),
+    )
+  })
+
+  it('uses public privacy guidance for a public rating target', async () => {
+    const dependencies = createDependencies()
+    dependencies.queryService.getQueryParams.mockResolvedValueOnce({
+      type: 'username',
+      username: 'public-user',
+      isSelf: false,
+      provider: 'auto',
+    })
+    dependencies.queryService.rating.mockRejectedValueOnce(
+      new plugin.ProviderPrivacyError('diving-fish'),
+    )
+    const app = await createApp(dependencies)
+    const client = app.mock.client('10001')
+
+    await client.shouldReply('/mai b50 public-user', /您查询的用户设置了查分器隐私/)
     expect(dependencies.renderer.renderRating).not.toHaveBeenCalled()
   })
 
@@ -401,6 +616,75 @@ describe('core maimai commands', () => {
       expect(dependencies.renderer.renderRating).toHaveBeenCalled()
     },
   )
+
+  it('renders 50 historical score-list records and handles a real next-page interaction', async () => {
+    const dependencies = createDependencies()
+    const records = Array.from({ length: 51 }, (_, index) => {
+      const music = createMusicFixture()
+      Object.defineProperties(music, {
+        id: { value: 2_000 + index },
+        name: { value: `Historical ${index + 1}` },
+        isNew: { value: false },
+      })
+      return new plugin.RecordEntry(
+        music,
+        music.charts[3],
+        1_000_000,
+        plugin.ComboStatus.FullCombo,
+        plugin.SyncStatus.FullSync,
+        300,
+        'sss',
+        300 - index,
+      )
+    })
+    dependencies.queryService.records.mockResolvedValue({
+      response: new plugin.RecordsResponse(new plugin.PlayerInfo('Tester'), null, records),
+      provider: { id: 'diving-fish', name: 'Diving Fish' },
+    })
+    const registerPagination = vi.spyOn(dependencies.callbackRouter, 'registerPagination')
+    const app = await createApp(dependencies)
+    const client = app.mock.client('10001', 'channel-a')
+    client.event.platform = 'qq'
+    const sendMessage = vi.spyOn(client.bot, 'sendMessage')
+
+    const [firstReply] = await client.receive('/mai 分数列表')
+
+    expect(dependencies.renderer.renderRating).toHaveBeenCalledTimes(1)
+    expect(dependencies.renderer.renderRating.mock.calls[0][0]).toMatchObject({
+      oldCount: 50,
+      newCount: 0,
+      oldRecords: expect.arrayContaining(records.slice(0, 50)),
+      newRecords: [],
+    })
+    expect(dependencies.renderer.renderRating.mock.calls[0][0].oldRecords).toHaveLength(50)
+    const nextToken = registerPagination.mock.results
+      .map(result => result.value)
+      .find(Boolean)
+    expect(nextToken).toMatch(/^mai:/)
+    expect(firstReply).toMatch(/<img/)
+    expect(sendMessage.mock.calls.some(call => (
+      JSON.stringify(call[1]).includes(nextToken)
+    ))).toBe(true)
+    const sendsAfterFirstPage = sendMessage.mock.calls.length
+
+    const session = client.bot.session({
+      type: 'interaction/button',
+      platform: 'qq',
+      user: { id: '10001' },
+      channel: { id: 'channel-a', type: Universal.Channel.Type.TEXT },
+      button: { id: nextToken },
+    })
+    session.user = { authority: 1, permissions: [] } as never
+    session.permissions = []
+    session['client'] = client
+    client.bot.dispatch(session)
+    await new Promise(resolve => setImmediate(resolve))
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(dependencies.renderer.renderRating).toHaveBeenCalledTimes(2)
+    expect(dependencies.renderer.renderRating.mock.calls[1][0].oldRecords).toEqual([records[50]])
+    expect(sendMessage.mock.calls.length).toBeGreaterThan(sendsAfterFirstPage)
+  })
 
   it.each(['分数列表', '分数表', '成绩列表', '成绩表'])(
     'reports an empty score-list alias %s',
@@ -503,6 +787,70 @@ describe('core maimai commands', () => {
     await client.shouldReply('/mai 段位表 不存在', /未找到/)
   })
 
+  it('samples four distinct random-course charts with the injected random source', async () => {
+    const dependencies = createDependencies()
+    const musics = Array.from({ length: 5 }, (_, index) => {
+      const music = createMusicFixture()
+      Object.defineProperties(music, {
+        id: { value: 3_000 + index },
+        name: { value: `Course Song ${index + 1}` },
+      })
+      return music
+    })
+    dependencies.data.musics = new Map(musics.map(music => [music.id, music]))
+    dependencies.data.courses = new Map([[20, {
+      id: 20,
+      name: '随机课题',
+      mode: 0,
+      random: true,
+      lower: 13.7,
+      upper: 13.7,
+      musics: [],
+      life: 100,
+      recover: 10,
+      damage: { perfect: 0, great: 1, good: 2, miss: 5 },
+    }]])
+    const sequence = [0.8, 0.1, 0.5, 0]
+    dependencies.random = vi.fn(() => sequence.shift() ?? 0)
+    const app = await createApp(dependencies)
+    const client = app.mock.client('10001')
+
+    await client.shouldReply('/mai 段位表 随机课题', /<img/)
+
+    const songs = dependencies.renderer.renderCourse.mock.calls[0][0].songs
+    expect(songs.map(song => song.chart.music.id)).toEqual([3_004, 3_000, 3_002, 3_001])
+    expect(new Set(songs.map(song => `${song.chart.music.id}:${song.chart.difficulty.value}`)).size).toBe(4)
+    expect(dependencies.random).toHaveBeenCalledTimes(4)
+  })
+
+  it('fails random courses explicitly when fewer than four charts are eligible', async () => {
+    const dependencies = createDependencies()
+    const musics = Array.from({ length: 3 }, (_, index) => {
+      const music = createMusicFixture()
+      Object.defineProperty(music, 'id', { value: 4_000 + index })
+      return music
+    })
+    dependencies.data.musics = new Map(musics.map(music => [music.id, music]))
+    dependencies.data.courses = new Map([[21, {
+      id: 21,
+      name: '不足课题',
+      mode: 0,
+      random: true,
+      lower: 13.7,
+      upper: 13.7,
+      musics: [],
+      life: 100,
+      recover: 10,
+      damage: { perfect: 0, great: 1, good: 2, miss: 5 },
+    }]])
+    const app = await createApp(dependencies)
+    const client = app.mock.client('10001')
+
+    await client.shouldReply('/mai 段位表 不足课题', /不足 4 张/)
+    expect(dependencies.renderer.renderCourse).not.toHaveBeenCalled()
+    expect(dependencies.queryService.records).not.toHaveBeenCalled()
+  })
+
   it('reports text progress and invalid progress filters', async () => {
     const dependencies = createDependencies()
     const app = await createApp(dependencies)
@@ -542,6 +890,24 @@ describe('core maimai commands', () => {
     await client.shouldReply('/mai bind 123456789', /绑定成功/)
     expect(dependencies.replayCommand).toHaveBeenCalledTimes(1)
   })
+
+  it.each(['b50', '/mai b50'])(
+    'normalizes and replays cached command %s once through real routing',
+    async (pending) => {
+      const dependencies = createDependencies()
+      dependencies.replayCommand = undefined
+      dependencies.queryService.consumePendingCommand
+        .mockReturnValueOnce(pending)
+        .mockReturnValue(null)
+      const app = await createApp(dependencies)
+      const client = app.mock.client('10001')
+
+      await client.shouldReply('/mai bind 123456789', [/绑定成功/, /<img/])
+      expect(dependencies.renderer.renderRating).toHaveBeenCalledTimes(1)
+      await client.shouldReply('/mai bind 123456789', /绑定成功/)
+      expect(dependencies.renderer.renderRating).toHaveBeenCalledTimes(1)
+    },
+  )
 
   it.each(['/mai bind nope', '/mai 绑定 nope', '/bind nope'])(
     'rejects invalid QQ binding alias %s',
@@ -706,6 +1072,7 @@ describe('core maimai commands', () => {
     expect(help.config.permissions).toContain('authority:1')
     expect(bind?._arguments.map(argument => argument.name)).toContain('qq')
     expect(aliasRemove).toBeDefined()
+    expect(aliasRemove?.config.permissions).toContain('authority:4')
   })
 
   it('runs exact prefixless commands at low priority for maimai users', async () => {
@@ -758,7 +1125,7 @@ describe('core maimai commands', () => {
     await client.shouldReply(content, expected)
   })
 
-  it.each(['查', 'id', 'id1001 extra', 'b5', '设置', '分数']) (
+  it.each(['查', 'id', 'id1001 extra', 'b5', '设置', '分数', '项目进度', '工作定数表']) (
     'does not consume partial compatibility text %s',
     async (content) => {
       const app = await createApp()
@@ -798,6 +1165,17 @@ describe('core maimai commands', () => {
       content: '查歌 test',
     }, next)
     expect(next).toHaveBeenCalledTimes(2)
+  })
+
+  it('passes through commands authored by another bot account', async () => {
+    const app = await createApp()
+    const downstream = vi.fn(async (_session, next) => next())
+    app.middleware(downstream)
+    const client = app.mock.client('other-bot')
+    client.event.user.isBot = true
+
+    await client.shouldNotReply('b50')
+    expect(downstream).toHaveBeenCalledTimes(1)
   })
 
   it('passes through when default-game lookup fails', async () => {

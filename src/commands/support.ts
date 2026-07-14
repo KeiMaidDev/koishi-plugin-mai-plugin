@@ -109,13 +109,17 @@ export async function replyImage(
   dependencies: CoreCommandDependencies,
   image: Buffer | Uint8Array,
   text = '',
+  rich?: h,
 ) {
+  const compatibilityMode = await compatibilityModeFor(session, dependencies)
+  if (session.platform === 'qq' && !compatibilityMode && rich) {
+    await session.send([h.image(Buffer.from(image), 'image/png'), rich])
+    return
+  }
   await sendReply(session, [
     { type: 'image', data: image, mimeType: 'image/png' },
     ...(text ? [{ type: 'text' as const, text }] : []),
-  ], undefined, {
-    compatibilityMode: await compatibilityModeFor(session, dependencies),
-  })
+  ], undefined, { compatibilityMode })
 }
 
 export async function replyAudio(session: ActiveCommandSession, audio: Buffer | Uint8Array) {

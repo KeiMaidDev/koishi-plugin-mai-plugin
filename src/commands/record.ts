@@ -45,8 +45,10 @@ export function registerRecordCommands(
         await replyText(session, dependencies, '未找到符合条件的谱面。')
         return
       }
+      let isSelf = true
       try {
         const user = await dependencies.queryService.getQueryParams(querySession(session), target)
+        isSelf = user.isSelf !== false
         const { response } = await dependencies.queryService.records(user, musics)
         const matched = filterRecords(filters, response.records, true)
           ?? defaultCompleted(response.records)
@@ -70,7 +72,7 @@ export function registerRecordCommands(
           `您的${filterText}进度如下：\n${lines.join('\n')}\n总计 ${totalRemaining} 个`,
         )
       } catch (error) {
-        const mapped = mapQueryError(error, { isSelf: true })
+        const mapped = mapQueryError(error, { isSelf })
         await replyText(session, dependencies, mapped.text)
       }
     }))]

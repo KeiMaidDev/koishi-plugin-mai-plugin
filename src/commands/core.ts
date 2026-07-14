@@ -1,4 +1,4 @@
-import type { Command, Context, Middleware } from 'koishi'
+import type { Command, Context, Fragment, Middleware, Session } from 'koishi'
 import { registerCalcCommands } from './calc'
 import { registerHelpCommand } from './help'
 import { registerImageCommands } from './image'
@@ -6,6 +6,7 @@ import { registerMusicCommands } from './music'
 import { registerRecordCommands } from './record'
 import { registerSettingsCommands } from './settings'
 import type { CoreCommandDependencies } from './support'
+import { parseComboQuery } from '../query/combo-parser'
 
 export type { CoreCommandDependencies } from './support'
 
@@ -49,6 +50,7 @@ const compatibilityPatterns = [
 export function isExactCompatibilityCommand(content: string) {
   const normalized = content.trim()
   return compatibilityPatterns.some(pattern => pattern.test(normalized))
+    && resolveCompatibilityExecution(normalized) !== null
 }
 
 function commandArgument(value: string) {
@@ -95,20 +97,30 @@ export function resolveCompatibilityExecution(content: string) {
   if (/^(?:兼容模式(?:\s+.*)?|取消兼容模式|关闭兼容模式|禁用兼容模式|打开兼容模式|启用兼容模式)$/.test(normalized)) {
     return `mai.compatibility ${commandArgument(normalized)}`
   }
-  if (/^(?:.*?)b(?:15|25|35|40|50)(?:\s+.*)?$/i.test(normalized)) {
+  if ((match = normalized.match(/^(.*?)b(?:15|25|35|40|50)(?:\s+.*)?$/i))) {
+    const filter = commandArgument(match[1])
+    if (filter && !parseComboQuery(filter)) return null
     return `mai.rating ${commandArgument(normalized)}`
   }
   if ((match = normalized.match(/^(.*?)(?:分数列表|分数表|成绩列表|成绩表)(?:\s+(\d+))?$/))) {
-    return `mai.score-list ${JSON.stringify(commandArgument(match[1]))} ${match[2] ?? 1}`
+    const filter = commandArgument(match[1])
+    if (filter && !parseComboQuery(filter)) return null
+    return `mai.score-list ${JSON.stringify(filter)} ${match[2] ?? 1}`
   }
   if ((match = normalized.match(/^(.*?)定数表$/))) {
-    return `mai.level-table ${commandArgument(match[1])}`
+    const filter = commandArgument(match[1])
+    if (filter && !parseComboQuery(filter)) return null
+    return `mai.level-table ${filter}`
   }
   if ((match = normalized.match(/^(?!.*未完成)(.*?)(?:完成表|进度表)$/))) {
-    return `mai.complete-table ${commandArgument(match[1])}`
+    const filter = commandArgument(match[1])
+    if (filter && !parseComboQuery(filter)) return null
+    return `mai.complete-table ${filter}`
   }
   if ((match = normalized.match(/^(.*?)(?:未完成表|未完成列表)$/))) {
-    return `mai.incomplete-table ${commandArgument(match[1])}`
+    const filter = commandArgument(match[1])
+    if (filter && !parseComboQuery(filter)) return null
+    return `mai.incomplete-table ${filter}`
   }
   if ((match = normalized.match(/^(?:info|minfo)\s+(.+)$/i))) {
     return `mai.song-score ${commandArgument(match[1])}`
@@ -120,9 +132,18 @@ export function resolveCompatibilityExecution(content: string) {
     return `mai.course ${commandArgument(match[1] ?? '')}`
   }
   if ((match = normalized.match(/^(.+?)进度(?:\s+(.*))?$/))) {
-    return `mai.progress ${commandArgument(match[1])} ${commandArgument(match[2] ?? '')}`
+    const filter = commandArgument(match[1])
+    if (!parseComboQuery(filter)) return null
+    return `mai.progress ${filter} ${commandArgument(match[2] ?? '')}`
   }
   return null
+}
+
+export function resolvePendingCommandExecution(content: string) {
+  const normalized = content.trim()
+  const legacy = normalized.match(/^\/mai(?:\s+(.*))?$/i)
+  if (legacy) return resolveCompatibilityExecution(legacy[1] ?? 'mai')
+  return resolveCompatibilityExecution(normalized)
 }
 
 export function createCompatibilityMiddleware(
@@ -133,11 +154,15 @@ export function createCompatibilityMiddleware(
   )
   return async (session, next) => {
     if (!supportedPlatforms.has(session.platform)) return next()
-    if (!session.userId || session.userId === session.selfId) return next()
-    const content = session.content?.trim() ?? ''
-    if (!content || content.startsWith('/') || !isExactCompatibilityCommand(content)) {
+    if (!session.userId || session.userId === session.selfId || session.event.user?.isBot) {
       return next()
     }
+    const content = session.content?.trim() ?? ''
+    if (!content || content.startsWith('/')) {
+      return next()
+    }
+    const execution = resolveCompatibilityExecution(content)
+    if (!execution) return next()
     let defaultGame: string
     try {
       defaultGame = await dependencies.settingService.getDefaultGame(session.userId)
@@ -145,8 +170,6 @@ export function createCompatibilityMiddleware(
       return next()
     }
     if (defaultGame !== 'maimai') return next()
-    const execution = resolveCompatibilityExecution(content)
-    if (!execution) return next()
     await session.execute(execution)
   }
 }
@@ -156,19 +179,55 @@ export interface CoreCommandRegistration {
   dispose(): void
 }
 
+function callbackPermissions(session: Session) {
+  return [...new Set([
+    ...(session.permissions ?? []),
+    ...((session.user as { permissions?: string[] } | undefined)?.permissions ?? []),
+    ...((session.channel as { permissions?: string[] } | undefined)?.permissions ?? []),
+  ])]
+}
+
+async function dispatchButtonCallback(
+  session: Session,
+  dependencies: CoreCommandDependencies,
+) {
+  const token = session.event.button?.id
+  if (!token?.startsWith('mai:') || !session.userId || !session.channelId) return
+  const result = await dependencies.callbackRouter.dispatch(token, {
+    userId: session.userId,
+    channelId: session.channelId,
+    authority: (session.user as { authority?: number } | undefined)?.authority,
+    permissions: callbackPermissions(session),
+  })
+  if (!result.ok || result.value === undefined || result.value === null) return
+  await session.send(result.value as Fragment)
+}
+
 export function registerCoreCommands(
   ctx: Context,
   dependencies: CoreCommandDependencies,
 ) {
+  const commandDependencies = dependencies.replayCommand
+    ? dependencies
+    : {
+        ...dependencies,
+        replayCommand: async (session: Session, command: string) => {
+          const execution = resolvePendingCommandExecution(command)
+          if (execution) await session.execute(execution)
+        },
+      }
   const commands = [
-    registerHelpCommand(ctx, dependencies),
-    ...registerSettingsCommands(ctx, dependencies),
-    ...registerMusicCommands(ctx, dependencies),
-    ...registerImageCommands(ctx, dependencies),
-    ...registerRecordCommands(ctx, dependencies),
-    ...registerCalcCommands(ctx, dependencies),
+    registerHelpCommand(ctx, commandDependencies),
+    ...registerSettingsCommands(ctx, commandDependencies),
+    ...registerMusicCommands(ctx, commandDependencies),
+    ...registerImageCommands(ctx, commandDependencies),
+    ...registerRecordCommands(ctx, commandDependencies),
+    ...registerCalcCommands(ctx, commandDependencies),
   ]
-  const disposeMiddleware = ctx.middleware(createCompatibilityMiddleware(dependencies))
+  const disposeMiddleware = ctx.middleware(createCompatibilityMiddleware(commandDependencies))
+  const disposeCallbacks = ctx.on('interaction/button', session => (
+    dispatchButtonCallback(session, commandDependencies)
+  ))
   let disposed = false
 
   return {
@@ -177,6 +236,7 @@ export function registerCoreCommands(
       if (disposed) return
       disposed = true
       disposeMiddleware()
+      disposeCallbacks()
       for (const command of [...commands].reverse()) command.dispose()
       dependencies.callbackRouter.clear()
     },

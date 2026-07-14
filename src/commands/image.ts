@@ -1,8 +1,15 @@
 import type { Context } from 'koishi'
+import h from '@satorijs/element'
 import { MusicDifficulty } from '../domain/enums'
 import type { ChartInfo, MusicInfo, RecordEntry } from '../domain/music'
 import type { RecordsResponse } from '../domain/player'
+import { Rating } from '../domain/rating'
 import { mapQueryError } from '../platform/fallback-message'
+import {
+  createPagedCallbackButtons,
+  createQqKeyboard,
+  createQqNativeMarkdown,
+} from '../platform/qq-message'
 import { filterCharts, filterMusics, filterRecords } from '../query/combo-executor'
 import { parseComboQuery } from '../query/combo-parser'
 import type { ComboFilter } from '../query/filter-types'
@@ -26,6 +33,7 @@ function querySession(session: ActiveCommandSession) {
         userId: String(element.attrs.id ?? ''),
         qq: element.attrs.id ? String(element.attrs.id) : undefined,
         isBot: String(element.attrs.id ?? '') === session.selfId,
+        isSelf: String(element.attrs.id ?? '') === session.selfId,
       })),
   }
 }
@@ -34,8 +42,9 @@ async function commandFailure(
   session: ActiveCommandSession,
   dependencies: CoreCommandDependencies,
   error: unknown,
+  isSelf = true,
 ) {
-  const mapped = mapQueryError(error, { isSelf: true })
+  const mapped = mapQueryError(error, { isSelf })
   await replyText(session, dependencies, mapped.text)
 }
 
@@ -57,6 +66,94 @@ function splitRatingRecords(records: readonly RecordEntry[], total: number) {
   }
 }
 
+function ratingRenderInput(
+  backend: string,
+  player: RecordsResponse['player'],
+  settings: RecordsResponse['settings'],
+  oldRecords: readonly RecordEntry[],
+  newRecords: readonly RecordEntry[],
+  total: number,
+) {
+  const { oldCount, newCount } = ratingCounts(total)
+  const legacy = total < 50
+  const normalize = (record: RecordEntry) => legacy
+    ? { ...record, rating: Rating.calcOld(record.chart, record.achievement) }
+    : record
+  const selectedOld = oldRecords.slice(0, oldCount).map(normalize)
+  const selectedNew = newRecords.slice(0, newCount).map(normalize)
+  const oldRating = selectedOld.reduce((sum, record) => sum + record.rating, 0)
+  const newRating = selectedNew.reduce((sum, record) => sum + record.rating, 0)
+  const courseRating = legacy ? Rating.courseOld(player.course) : 0
+  const rating = oldRating + newRating + courseRating
+  const coursePart = courseRating ? ` + COURSE ${courseRating}` : ''
+  return {
+    backend,
+    player,
+    settings,
+    oldRecords: selectedOld,
+    newRecords: selectedNew,
+    oldCount,
+    newCount,
+    rating,
+    title: `[${backend}] B${oldCount} ${oldRating} + B${newCount} ${newRating}${coursePart} = ${rating}`,
+    oldLabel: `BEST ${oldCount}`,
+    newLabel: `NEW ${newCount}`,
+  }
+}
+
+async function createScoreListPage(
+  dependencies: CoreCommandDependencies,
+  response: RecordsResponse,
+  backend: string,
+  records: readonly RecordEntry[],
+  filter: string,
+  requestedPage: number,
+  scope: { userId: string, channelId: string },
+) {
+  const totalPages = Math.max(1, Math.ceil(records.length / SCORE_LIST_PAGE_SIZE))
+  const currentPage = Math.min(Math.max(1, requestedPage), totalPages)
+  const offset = (currentPage - 1) * SCORE_LIST_PAGE_SIZE
+  const pageRecords = records.slice(offset, offset + SCORE_LIST_PAGE_SIZE)
+  const image = await dependencies.renderer.renderRating({
+    backend,
+    player: response.player,
+    settings: response.settings,
+    oldRecords: pageRecords,
+    newRecords: [],
+    oldCount: pageRecords.length,
+    newCount: 0,
+  })
+  const text = `${currentPage} / ${totalPages}`
+  const row = createPagedCallbackButtons({
+    page: currentPage,
+    totalPages,
+    callbackData: page => dependencies.callbackRouter.registerPagination({
+      payload: { mode: 'score-list', filter, page },
+      expectedUserId: scope.userId,
+      expectedChannelId: scope.channelId,
+      handler: async payload => (
+        await createScoreListPage(
+          dependencies,
+          response,
+          backend,
+          records,
+          payload.filter,
+          payload.page,
+          scope,
+        )
+      ).callbackReply,
+    }),
+  })
+  const keyboard = row.buttons.length ? createQqKeyboard([row]) : undefined
+  const rich = createQqNativeMarkdown(text, keyboard)
+  return {
+    image,
+    text,
+    rich,
+    callbackReply: [h.image(Buffer.from(image), 'image/png'), rich],
+  }
+}
+
 function chartKey(chart: ChartInfo) {
   return `${chart.music.id}:${chart.difficulty.value}`
 }
@@ -68,6 +165,22 @@ function groupsFor(charts: readonly ChartInfo[]) {
       charts: charts.filter(chart => chart.difficulty === difficulty),
     }))
     .filter(group => group.charts.length)
+}
+
+function sampleCharts(
+  charts: readonly ChartInfo[],
+  count: number,
+  random: () => number,
+) {
+  const pool = [...charts]
+  return Array.from({ length: count }, () => {
+    const value = random()
+    const index = Math.min(
+      pool.length - 1,
+      Math.max(0, Math.floor((Number.isFinite(value) ? value : 0) * pool.length)),
+    )
+    return pool.splice(index, 1)[0]
+  })
 }
 
 function levelProgress(charts: readonly ChartInfo[], completed: ReadonlySet<string>) {
@@ -136,19 +249,20 @@ export function registerImageCommands(
       const filterText = match[1].trim()
       const total = Number(match[2])
       const target = match[3]?.trim() ?? ''
+      let isSelf = true
       try {
         const user = await dependencies.queryService.getQueryParams(querySession(session), target)
+        isSelf = user.isSelf !== false
         if (!filterText) {
           const { response, provider } = await dependencies.queryService.rating(user)
-          const counts = ratingCounts(total)
-          const image = await dependencies.renderer.renderRating({
-            backend: provider.name,
-            player: response.player,
-            settings: response.settings,
-            oldRecords: response.oldRatingList.slice(0, counts.oldCount),
-            newRecords: response.newRatingList.slice(0, counts.newCount),
-            ...counts,
-          })
+          const image = await dependencies.renderer.renderRating(ratingRenderInput(
+            provider.name,
+            response.player,
+            response.settings,
+            response.oldRatingList,
+            response.newRatingList,
+            total,
+          ))
           await replyImage(session, dependencies, image)
           return
         }
@@ -165,15 +279,17 @@ export function registerImageCommands(
           return
         }
         const split = splitRatingRecords(records, total)
-        const image = await dependencies.renderer.renderRating({
-          backend: provider.name,
-          player: response.player,
-          settings: response.settings,
-          ...split,
-        })
+        const image = await dependencies.renderer.renderRating(ratingRenderInput(
+          provider.name,
+          response.player,
+          response.settings,
+          split.oldRecords,
+          split.newRecords,
+          total,
+        ))
         await replyImage(session, dependencies, image)
       } catch (error) {
-        await commandFailure(session, dependencies, error)
+        await commandFailure(session, dependencies, error, isSelf)
       }
     })))
 
@@ -187,6 +303,7 @@ export function registerImageCommands(
         await replyText(session, dependencies, '请输入正确的页数。')
         return
       }
+      let isSelf = true
       try {
         const selected = filtersAndCharts(dependencies, filterText)
         if (!selected) {
@@ -194,6 +311,7 @@ export function registerImageCommands(
           return
         }
         const user = await dependencies.queryService.getQueryParams(querySession(session))
+        isSelf = user.isSelf !== false
         const musics = selected.musics.length
           ? selected.musics
           : [...dependencies.data.musics.values()]
@@ -203,31 +321,24 @@ export function registerImageCommands(
           await replyText(session, dependencies, '当前条件下没有成绩。')
           return
         }
-        const totalPages = Math.max(1, Math.ceil(records.length / SCORE_LIST_PAGE_SIZE))
-        const currentPage = Math.min(page, totalPages)
-        const offset = (currentPage - 1) * SCORE_LIST_PAGE_SIZE
-        const pageRecords = records.slice(offset, offset + SCORE_LIST_PAGE_SIZE)
-        if (totalPages > 1) {
-          for (const targetPage of [currentPage - 1, currentPage + 1]) {
-            if (targetPage < 1 || targetPage > totalPages) continue
-            dependencies.callbackRouter.registerPagination({
-              payload: { mode: 'score-list', filter: filterText, page: targetPage },
-              expectedUserId: session.userId,
-              expectedChannelId: session.channelId,
-              handler: payload => `${payload.page} / ${totalPages}`,
-            })
-          }
-        }
-        const split = splitRatingRecords(pageRecords, SCORE_LIST_PAGE_SIZE)
-        const image = await dependencies.renderer.renderRating({
-          backend: provider.name,
-          player: response.player,
-          settings: response.settings,
-          ...split,
-        })
-        await replyImage(session, dependencies, image, `${currentPage} / ${totalPages}`)
+        const rendered = await createScoreListPage(
+          dependencies,
+          response,
+          provider.name,
+          records,
+          filterText,
+          page,
+          { userId: session.userId, channelId: session.channelId },
+        )
+        await replyImage(
+          session,
+          dependencies,
+          rendered.image,
+          rendered.text,
+          rendered.rich,
+        )
       } catch (error) {
-        await commandFailure(session, dependencies, error)
+        await commandFailure(session, dependencies, error, isSelf)
       }
     })))
 
@@ -254,8 +365,10 @@ export function registerImageCommands(
         await replyText(session, dependencies, '未找到符合条件的谱面。')
         return
       }
+      let isSelf = true
       try {
         const user = await dependencies.queryService.getQueryParams(querySession(session))
+        isSelf = user.isSelf !== false
         const { response } = await dependencies.queryService.records(user, selected.musics)
         const matched = filterRecords(selected.filters, response.records, true)
           ?? response.records.filter(record => record.achievement >= 800_000)
@@ -269,7 +382,7 @@ export function registerImageCommands(
           completed,
         )
       } catch (error) {
-        await commandFailure(session, dependencies, error)
+        await commandFailure(session, dependencies, error, isSelf)
       }
     })))
 
@@ -281,8 +394,10 @@ export function registerImageCommands(
         await replyText(session, dependencies, '未找到符合条件的谱面。')
         return
       }
+      let isSelf = true
       try {
         const user = await dependencies.queryService.getQueryParams(querySession(session))
+        isSelf = user.isSelf !== false
         const { response } = await dependencies.queryService.records(user, selected.musics)
         const matched = filterRecords(selected.filters, response.records, true)
           ?? response.records.filter(record => record.achievement >= 800_000)
@@ -301,7 +416,7 @@ export function registerImageCommands(
           completed,
         )
       } catch (error) {
-        await commandFailure(session, dependencies, error)
+        await commandFailure(session, dependencies, error, isSelf)
       }
     })))
 
@@ -318,8 +433,10 @@ export function registerImageCommands(
         await replyText(session, dependencies, '未找到该歌曲。')
         return
       }
+      let isSelf = true
       try {
         const user = await dependencies.queryService.getQueryParams(querySession(session))
+        isSelf = user.isSelf !== false
         const { response } = await dependencies.queryService.record(user, music)
         const difficulty = options.difficulty
           ? MusicDifficulty.from(options.difficulty.replace('谱', ''))
@@ -330,7 +447,7 @@ export function registerImageCommands(
         const image = await dependencies.renderer.renderScore({ music, records })
         await replyImage(session, dependencies, image)
       } catch (error) {
-        await commandFailure(session, dependencies, error)
+        await commandFailure(session, dependencies, error, isSelf)
       }
     })))
 
@@ -346,16 +463,24 @@ export function registerImageCommands(
         await replyText(session, dependencies, '未找到该段位。')
         return
       }
+      let isSelf = true
       try {
-        const charts = course.random
+        const eligibleCharts = course.random
           ? [...dependencies.data.musics.values()].flatMap(music => music.charts)
             .filter(chart => chart.levelValue >= course.lower && chart.levelValue <= course.upper)
-            .slice(0, 4)
+          : []
+        if (course.random && eligibleCharts.length < 4) {
+          await replyText(session, dependencies, '随机段位可用谱面不足 4 张。')
+          return
+        }
+        const charts = course.random
+          ? sampleCharts(eligibleCharts, 4, dependencies.random ?? Math.random)
           : course.musics.map(entry => dependencies.data.musics.get(entry.id)?.charts.find(
             chart => chart.difficulty.value === entry.difficulty,
           )).filter((chart): chart is ChartInfo => Boolean(chart))
         const musics = [...new Set(charts.map(chart => chart.music))]
         const user = await dependencies.queryService.getQueryParams(querySession(session))
+        isSelf = user.isSelf !== false
         const { response } = await dependencies.queryService.records(user, musics)
         const image = await dependencies.renderer.renderCourse({
           course,
@@ -366,7 +491,7 @@ export function registerImageCommands(
         })
         await replyImage(session, dependencies, image)
       } catch (error) {
-        await commandFailure(session, dependencies, error)
+        await commandFailure(session, dependencies, error, isSelf)
       }
     })))
 

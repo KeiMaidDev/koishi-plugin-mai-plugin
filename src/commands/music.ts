@@ -1,4 +1,5 @@
 import type { Context } from 'koishi'
+import { Worker } from 'node:worker_threads'
 import { MusicDifficulty } from '../domain/enums'
 import type { ChartInfo, MusicInfo } from '../domain/music'
 import { isAdministrator } from '../platform/admin'
@@ -15,6 +16,7 @@ import {
   replyAudio,
   replyText,
   SEARCH_PAGE_SIZE,
+  SEARCH_TOO_MANY,
   type ActiveCommandSession,
   type CoreCommandDependencies,
 } from './support'
@@ -22,6 +24,8 @@ import {
 const NOT_FOUND = '未找到相关歌曲。'
 const LEVEL_USAGE = '用法：定数查歌 <定数或范围> [页数]'
 const FIT_LEVEL_USAGE = '用法：拟合定数查歌 <定数或范围> [页数]'
+const USER_REGEX_TIMEOUT_MS = 100
+const USER_REGEX_STARTUP_TIMEOUT_MS = 1_000
 
 const difficultyTokens = [
   '绿谱', '绿', '黄谱', '黄', '红谱', '红', '紫谱', '紫', '白谱', '白',
@@ -86,6 +90,10 @@ async function showResults(
     await replyText(session, dependencies, NOT_FOUND)
     return
   }
+  if (results.length > SEARCH_TOO_MANY) {
+    await replyText(session, dependencies, '在当前条件下查询到的曲目过多，请缩小范围。')
+    return
+  }
   if (results.length === 1) {
     const result = results[0]
     await replyText(
@@ -139,16 +147,69 @@ function regexRiskReason(source: string) {
   return null
 }
 
-type UserRegexResult = { regex: RegExp } | { error: string }
+type UserRegexValidation = { source: string } | { error: string }
 
-function compileUserRegex(source: string): UserRegexResult {
+function validateUserRegex(source: string): UserRegexValidation {
   const risk = regexRiskReason(source)
   if (risk) return { error: risk }
   try {
-    return { regex: new RegExp(source, 'iu') }
+    new RegExp(source, 'iu')
+    return { source }
   } catch {
     return { error: '请输入正确的正则表达式。' }
   }
+}
+
+type WorkerRegexResult = { matches: number[] } | { error: 'malformed' | 'timeout' }
+
+const regexWorkerSource = `
+const { parentPort, workerData } = require('node:worker_threads')
+try {
+  const regex = new RegExp(workerData.source, 'iu')
+  const matches = []
+  for (let index = 0; index < workerData.values.length; index++) {
+    if (regex.test(workerData.values[index])) matches.push(index)
+  }
+  parentPort.postMessage({ matches })
+} catch {
+  parentPort.postMessage({ error: 'malformed' })
+}
+`
+
+function executeUserRegex(
+  source: string,
+  values: readonly string[],
+): Promise<WorkerRegexResult> {
+  return new Promise((resolve) => {
+    const worker = new Worker(regexWorkerSource, {
+      eval: true,
+      workerData: { source, values },
+    })
+    let settled = false
+    let timeout: ReturnType<typeof setTimeout>
+    const finish = (result: WorkerRegexResult) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      resolve(result)
+    }
+    const terminateAsTimeout = () => {
+      if (settled) return
+      settled = true
+      void worker.terminate().finally(() => resolve({ error: 'timeout' }))
+    }
+    timeout = setTimeout(terminateAsTimeout, USER_REGEX_STARTUP_TIMEOUT_MS)
+    worker.once('online', () => {
+      if (settled) return
+      clearTimeout(timeout)
+      timeout = setTimeout(terminateAsTimeout, USER_REGEX_TIMEOUT_MS)
+    })
+    worker.once('message', (result: WorkerRegexResult) => finish(result))
+    worker.once('error', () => finish({ error: 'malformed' }))
+    worker.once('exit', (code) => {
+      if (code !== 0) finish({ error: 'malformed' })
+    })
+  })
 }
 
 function seededValue(input: string) {
@@ -185,8 +246,9 @@ function registerTextShortcut(
   description: string,
   pattern: RegExp,
   action: (session: ActiveCommandSession, raw: string) => Promise<void>,
+  authority?: number,
 ) {
-  return ctx.command(definition, description)
+  return ctx.command(definition, description, authority === undefined ? {} : { authority })
     .shortcut(pattern, { args: ['$1'] })
     .action(commandAction(async ({ session }, raw = '') => {
       await action(session, raw)
@@ -336,13 +398,27 @@ export function registerMusicCommands(
     '按安全正则表达式查歌',
     /^\/mai\s+正则查歌(?:\s+(.*))?$/,
     async (session, raw) => {
-      const compiled = compileUserRegex(raw.trim())
-      if ('error' in compiled) {
-        await replyText(session, dependencies, compiled.error)
+      const validated = validateUserRegex(raw.trim())
+      if ('error' in validated) {
+        await replyText(session, dependencies, validated.error)
         return
       }
-      const results = [...dependencies.data.musics.values()]
-        .filter(music => compiled.regex.test(music.name.slice(0, 256)))
+      const musics = [...dependencies.data.musics.values()]
+      const execution = await executeUserRegex(
+        validated.source,
+        musics.map(music => music.name.slice(0, 256)),
+      )
+      if ('error' in execution) {
+        await replyText(
+          session,
+          dependencies,
+          execution.error === 'timeout'
+            ? '正则表达式执行超时。'
+            : '请输入正确的正则表达式。',
+        )
+        return
+      }
+      const results = execution.matches.map(index => musics[index])
       await showResults(session, dependencies, results, raw)
     },
   ))
@@ -446,6 +522,7 @@ export function registerMusicCommands(
       await dependencies.aliasService.remove(music.id, alias)
       await replyText(session, dependencies, '别名删除成功。')
     },
+    4,
   ))
 
   commands.push(ctx.command('mai.daily', '生成稳定的今日舞萌推荐')

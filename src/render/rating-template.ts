@@ -31,6 +31,9 @@ export interface RatingRenderInput {
   oldCount?: number
   newCount?: number
   rating?: number
+  title?: string
+  oldLabel?: string
+  newLabel?: string
 }
 
 export interface RatingRenderPlan {
@@ -533,7 +536,8 @@ export async function createRatingRenderPlan(
   const oldRating = input.oldRecords.slice(0, oldCount).reduce((sum, record) => sum + record.rating, 0)
   const newRating = input.newRecords.slice(0, newCount).reduce((sum, record) => sum + record.rating, 0)
   const rating = input.rating ?? oldRating + newRating
-  const title = `[${input.backend}] B35 ${oldRating} + B15 ${newRating} = ${rating}`
+  const title = input.title
+    ?? `[${input.backend}] B${oldCount} ${oldRating} + B${newCount} ${newRating} = ${rating}`
   const fallbackPlate = resolvePackageAssetPath('fallback/plate.png')
   const fallbackAvatar = resolvePackageAssetPath('fallback/avatar.png')
   const [numberPlate, danBadge, statusPlate] = await Promise.all([
@@ -544,8 +548,8 @@ export async function createRatingRenderPlan(
   const generatedAssets = { numberPlate, danBadge, statusPlate }
   const [header, oldSection, newSection] = await Promise.all([
     ratingHeader(input, title, rating, generatedAssets, renderService, data),
-    ratingSection(`BEST ${oldCount}`, 'old', oldCount, input.oldRecords, generatedAssets, renderService, data),
-    ratingSection(`NEW ${newCount}`, 'new', newCount, input.newRecords, generatedAssets, renderService, data),
+    ratingSection(input.oldLabel ?? `BEST ${oldCount}`, 'old', oldCount, input.oldRecords, generatedAssets, renderService, data),
+    ratingSection(input.newLabel ?? `NEW ${newCount}`, 'new', newCount, input.newRecords, generatedAssets, renderService, data),
   ])
 
   return {

@@ -46,6 +46,10 @@ function guessContextId(session: Pick<Session, 'platform' | 'channelId' | 'isDir
   return `${session.platform}:${session.isDirect ? 'private' : 'channel'}:${session.channelId}`
 }
 
+export function guessSettingId(session: Pick<Session, 'platform' | 'channelId'>) {
+  return `${session.platform}:${session.channelId}`
+}
+
 async function sendGuessReply(
   session: ActiveCommandSession,
   dependencies: GuessCommandDependencies,
@@ -85,7 +89,7 @@ async function groupGuessEnabled(
   dependencies: GuessCommandDependencies,
 ) {
   if (session.isDirect) return true
-  const stored = await dependencies.settingRepository.get(session.channelId, GUESS_SETTING_KEY)
+  const stored = await dependencies.settingRepository.get(guessSettingId(session), GUESS_SETTING_KEY)
   return stored !== 'false' && stored !== '0'
 }
 
@@ -156,7 +160,7 @@ async function setGuessEnabled(
   }
   try {
     await dependencies.settingRepository.set(
-      session.channelId,
+      guessSettingId(session),
       GUESS_SETTING_KEY,
       enabled ? 'true' : 'false',
     )

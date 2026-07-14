@@ -154,6 +154,54 @@ function createHarness(options: {
   }
 }
 
+function createRestoredClassicalRow(contextId = 'group:restored') {
+  return {
+    contextId,
+    platform: 'mock',
+    channelId: contextId.replace(/^.*:/, ''),
+    guildId: 'guild-1',
+    userId: '10001',
+    type: 'classical',
+    status: {
+      version: 1,
+      phase: 'hints',
+      gameId: `restored-${contextId}`,
+      musicId: 1001,
+      hints: Array.from({ length: 6 }, (_, index) => `hint-${index + 1}`),
+      hintIndex: 2,
+      nextAt: Date.parse('2026-07-14T12:00:05.000Z'),
+      seed: `seed-${contextId}`,
+    },
+    modifiedAt: new Date('2026-07-14T11:45:00.000Z'),
+  }
+}
+
+function createRestoredOpeningRow(contextId = 'group:opening-restored') {
+  return {
+    contextId,
+    platform: 'mock',
+    channelId: contextId.replace(/^.*:/, ''),
+    guildId: 'guild-1',
+    userId: '10001',
+    type: 'opening',
+    status: {
+      version: 1,
+      phase: 'playing',
+      gameId: `restored-${contextId}`,
+      musics: [{ musicId: 1001, revealed: false }],
+      opened: [],
+    },
+    modifiedAt: new Date('2026-07-14T11:45:00.000Z'),
+  }
+}
+
+async function settlementBeforeGateRelease(promise: Promise<unknown>) {
+  return Promise.race([
+    promise.then(() => 'settled', () => 'settled'),
+    new Promise<'pending'>(resolve => setTimeout(() => resolve('pending'), 0)),
+  ])
+}
+
 async function createGuessCommandApp() {
   const app = new Context()
   app.plugin(memory)
@@ -470,6 +518,53 @@ describe('maimai guessing games', () => {
     expect(harness.replies.at(-1)?.text).toBe('歌曲不在题目列表中！')
   })
 
+  it('matches aliases by normalized resolved title across SD and DX chart IDs', async () => {
+    const standard = createMusic(1001, 'Shared Song')
+    const deluxe = createMusic(1002, 'ＳＨＡＲＥＤ　ＳＯＮＧ')
+    Object.assign(deluxe, { type: plugin.MusicType.Deluxe })
+    const fillers = Array.from({ length: 6 }, (_, index) => (
+      createMusic(1100 + index, `Filler ${index}`)
+    ))
+    const harness = createHarness({
+      musics: [standard, deluxe, ...fillers],
+      aliases: { shared: [1002] },
+    })
+
+    const classical = harness.interaction('group:title-classical')
+    await harness.service.startClassical(classical)
+    await expect(harness.service.handleMessage({ ...classical, content: 'shared' }))
+      .resolves.toMatchObject({ consumed: true, action: 'correct' })
+
+    const free = harness.interaction('group:title-free')
+    await harness.service.startOpening(free)
+    await harness.service.handleMessage({ ...free, content: 'shared' })
+    expect(harness.transitions.at(-1)?.status.musics.slice(0, 2)).toEqual([
+      { musicId: 1001, revealed: true },
+      { musicId: 1002, revealed: false },
+    ])
+
+    const reveal = harness.interaction('group:title-reveal')
+    await harness.service.startOpening(reveal)
+    await harness.service.handleMessage({ ...reveal, content: '开歌 shared' })
+    expect(harness.transitions.at(-1)?.status.musics.slice(0, 2)).toEqual([
+      { musicId: 1001, revealed: true },
+      { musicId: 1002, revealed: false },
+    ])
+  })
+
+  it('normalizes an opening letter before enforcing one code point', async () => {
+    const harness = createHarness()
+    const interaction = harness.interaction()
+    await harness.service.startOpening(interaction)
+    const transitionsBefore = harness.transitions.length
+
+    await expect(harness.service.handleMessage({ ...interaction, content: '开字母 İ' }))
+      .resolves.toMatchObject({ consumed: true, action: 'invalid' })
+
+    expect(harness.transitions).toHaveLength(transitionsBefore)
+    expect(harness.rows.get('group:1000')?.status.opened).toEqual([])
+  })
+
   it('restores one fresh timer from the persisted phase and replaces it idempotently', async () => {
     const nextAt = Date.parse('2026-07-14T12:00:05.000Z')
     const restored = [{
@@ -516,6 +611,62 @@ describe('maimai guessing games', () => {
       seed: 'stable-seed',
     })
     expect(harness.rows.has('group:invalid')).toBe(false)
+  })
+
+  it('removes persisted games with impossible phases, counters, IDs, or opened letters', async () => {
+    const invalidRows = [
+      {
+        ...createRestoredOpeningRow('group:all-revealed'),
+        status: {
+          ...createRestoredOpeningRow().status,
+          musics: [{ musicId: 1001, revealed: true }],
+        },
+      },
+      {
+        ...createRestoredOpeningRow('group:duplicate-musics'),
+        status: {
+          ...createRestoredOpeningRow().status,
+          musics: [
+            { musicId: 1001, revealed: false },
+            { musicId: 1001, revealed: false },
+          ],
+        },
+      },
+      {
+        ...createRestoredOpeningRow('group:non-normalized-opened'),
+        status: { ...createRestoredOpeningRow().status, opened: ['A'] },
+      },
+      {
+        ...createRestoredOpeningRow('group:duplicate-opened'),
+        status: { ...createRestoredOpeningRow().status, opened: ['a', 'Ａ'] },
+      },
+      {
+        ...createRestoredOpeningRow('group:impossible-finished'),
+        status: { ...createRestoredOpeningRow().status, phase: 'finished' },
+      },
+      {
+        ...createRestoredClassicalRow('group:zero-hints'),
+        status: { ...createRestoredClassicalRow().status, hintIndex: 0 },
+      },
+      {
+        ...createRestoredClassicalRow('group:early-crop'),
+        status: { ...createRestoredClassicalRow().status, phase: 'crop', hintIndex: 5 },
+      },
+    ]
+    const valid = createRestoredOpeningRow('group:valid-opening')
+    const harness = createHarness({ restored: [valid, ...invalidRows] })
+
+    try {
+      await expect(harness.service.restore()).resolves.toBe(1)
+      expect(harness.service.hasActiveGame(valid.contextId)).toBe(true)
+      for (const row of invalidRows) {
+        expect(harness.service.hasActiveGame(row.contextId)).toBe(false)
+        expect(harness.rows.has(row.contextId)).toBe(false)
+      }
+      expect(harness.timers.size).toBe(0)
+    } finally {
+      await harness.service.dispose()
+    }
   })
 
   it('cleans failed starts, disposal, timers, and persisted rows', async () => {
@@ -600,6 +751,141 @@ describe('maimai guessing games', () => {
 
     expect(result).toEqual({ ok: true, type: 'opening' })
     expect(harness.rows.has('group:1000')).toBe(true)
+  })
+
+  it('waits for an accepted blocked removal before disposal completes', async () => {
+    const harness = createHarness()
+    await harness.service.startClassical(harness.interaction())
+    const originalRemove = harness.repository.remove.getMockImplementation()!
+    let enterRemove!: () => void
+    let releaseRemove!: () => void
+    const removeEntered = new Promise<void>(resolve => {
+      enterRemove = resolve
+    })
+    const removeGate = new Promise<void>(resolve => {
+      releaseRemove = resolve
+    })
+    harness.repository.remove.mockImplementationOnce(async (...args: any[]) => {
+      enterRemove()
+      await removeGate
+      return originalRemove(...args)
+    })
+
+    const stopping = harness.service.stop('group:1000')
+    await removeEntered
+    const disposing = harness.service.dispose()
+    const state = await settlementBeforeGateRelease(disposing)
+    releaseRemove()
+    await Promise.all([stopping, disposing])
+
+    expect(state).toBe('pending')
+    expect(harness.rows.size).toBe(0)
+    expect(harness.timers.size).toBe(0)
+  })
+
+  it('serializes restore before a concurrent start can replace its runtime', async () => {
+    const contextId = 'group:restore-start'
+    const harness = createHarness({ restored: [createRestoredClassicalRow(contextId)] })
+    const originalRestore = harness.repository.restore.getMockImplementation()!
+    let enterRestore!: () => void
+    let releaseRestore!: () => void
+    const restoreEntered = new Promise<void>(resolve => {
+      enterRestore = resolve
+    })
+    const restoreGate = new Promise<void>(resolve => {
+      releaseRestore = resolve
+    })
+    harness.repository.restore.mockImplementationOnce(async (...args: any[]) => {
+      enterRestore()
+      await restoreGate
+      return originalRestore(...args)
+    })
+
+    const restoring = harness.service.restore()
+    await restoreEntered
+    const starting = harness.service.startOpening(harness.interaction(contextId))
+    const state = await settlementBeforeGateRelease(starting)
+    releaseRestore()
+    const [, startResult] = await Promise.all([restoring, starting])
+
+    expect(state).toBe('pending')
+    expect(startResult).toEqual({ ok: false, reason: 'active' })
+    expect(harness.timers.size).toBe(1)
+  })
+
+  it('serializes stop behind restore so a subsequently attached game is removed', async () => {
+    const contextId = 'group:restore-stop'
+    const harness = createHarness({ restored: [createRestoredClassicalRow(contextId)] })
+    const originalRestore = harness.repository.restore.getMockImplementation()!
+    let enterRestore!: () => void
+    let releaseRestore!: () => void
+    const restoreEntered = new Promise<void>(resolve => {
+      enterRestore = resolve
+    })
+    const restoreGate = new Promise<void>(resolve => {
+      releaseRestore = resolve
+    })
+    harness.repository.restore.mockImplementationOnce(async (...args: any[]) => {
+      enterRestore()
+      await restoreGate
+      return originalRestore(...args)
+    })
+
+    const restoring = harness.service.restore()
+    await restoreEntered
+    const stopping = harness.service.stop(contextId)
+    const state = await settlementBeforeGateRelease(stopping)
+    releaseRestore()
+    const [, stopped] = await Promise.all([restoring, stopping])
+
+    expect(state).toBe('pending')
+    expect(stopped).toBe(true)
+    expect(harness.service.hasActiveGame(contextId)).toBe(false)
+    expect(harness.timers.size).toBe(0)
+    expect(harness.rows.has(contextId)).toBe(false)
+  })
+
+  it('serializes disposal behind restore and removes every attached runtime', async () => {
+    const contextId = 'group:restore-dispose'
+    const harness = createHarness({ restored: [createRestoredClassicalRow(contextId)] })
+    const originalRestore = harness.repository.restore.getMockImplementation()!
+    let enterRestore!: () => void
+    let releaseRestore!: () => void
+    const restoreEntered = new Promise<void>(resolve => {
+      enterRestore = resolve
+    })
+    const restoreGate = new Promise<void>(resolve => {
+      releaseRestore = resolve
+    })
+    harness.repository.restore.mockImplementationOnce(async (...args: any[]) => {
+      enterRestore()
+      await restoreGate
+      return originalRestore(...args)
+    })
+
+    const restoring = harness.service.restore()
+    await restoreEntered
+    const disposing = harness.service.dispose()
+    const state = await settlementBeforeGateRelease(disposing)
+    releaseRestore()
+    await Promise.all([restoring, disposing])
+
+    expect(state).toBe('pending')
+    expect(harness.service.hasActiveGame(contextId)).toBe(false)
+    expect(harness.timers.size).toBe(0)
+    expect(harness.rows.has(contextId)).toBe(false)
+  })
+
+  it('does not restore or reset availability after disposal', async () => {
+    const harness = createHarness({ restored: [createRestoredClassicalRow()] })
+    await harness.service.dispose()
+    harness.repository.restore.mockClear()
+
+    await expect(harness.service.restore()).resolves.toBe(0)
+    expect(harness.repository.restore).not.toHaveBeenCalled()
+    await expect(harness.service.startClassical(harness.interaction()))
+      .resolves.toEqual({ ok: false, reason: 'unavailable' })
+    expect(harness.timers.size).toBe(0)
   })
 
   it('waits out an in-flight timer transition before disposal removes its final row', async () => {
@@ -705,7 +991,7 @@ describe('maimai guessing games', () => {
   })
 
   it('persists isolated group settings and accepts authority, configured, or role administrators', async () => {
-    const { app, registration, settings } = await createGuessCommandApp()
+    const { app, registration, settings, settingRepository } = await createGuessCommandApp()
     const ordinary = asGroup(app.mock.client('ordinary', 'group-a'))
     const authorityAdmin = asGroup(app.mock.client('authority-admin', 'group-a'))
     const configuredAdmin = asGroup(app.mock.client('configured-admin', 'group-a'))
@@ -717,14 +1003,22 @@ describe('maimai guessing games', () => {
     try {
       await ordinary.shouldReply('禁用猜歌', /权限不足/)
       await authorityAdmin.shouldReply('禁用猜歌', /禁用猜歌成功/)
-      expect(settings.get('group-a:guess')).toBe('false')
+      expect(settings.get('mock:group-a:guess')).toBe('false')
       await ordinary.shouldReply('猜歌', /已被禁用/)
 
       await otherGroup.shouldReply('猜歌', [/maimai 猜歌/, /提示1\/7/])
       await configuredAdmin.shouldReply('启用猜歌', /启用猜歌成功/)
-      expect(settings.get('group-a:guess')).toBe('true')
+      expect(settings.get('mock:group-a:guess')).toBe('true')
       await roleAdmin.shouldReply('关闭猜歌', /禁用猜歌成功/)
-      expect(settings.get('group-c:guess')).toBe('false')
+      expect(settings.get('mock:group-c:guess')).toBe('false')
+
+      const settingId = Reflect.get(plugin, 'guessSettingId')
+      expect(settingId).toBeTypeOf('function')
+      const qqId = settingId({ platform: 'qq', channelId: 'shared-channel' })
+      const discordId = settingId({ platform: 'discord', channelId: 'shared-channel' })
+      await settingRepository.set(qqId, plugin.GUESS_SETTING_KEY, 'false')
+      expect(await settingRepository.get(discordId, plugin.GUESS_SETTING_KEY)).toBeNull()
+      expect(qqId).not.toBe(discordId)
 
       await privateClient.shouldReply('禁用猜歌', /仅支持群聊/)
       await privateClient.shouldReply('猜歌', [/maimai 猜歌/, /提示1\/7/])
@@ -808,6 +1102,62 @@ describe('maimai guessing games', () => {
       expect(dependencies.guessService.hasActiveGame('mock:channel:restored')).toBe(true)
       await dependencies.guessService.dispose()
     } finally {
+      await app.stop()
+    }
+  })
+
+  it('disposes a partially restored guessing service when default initialization fails', async () => {
+    const app = new Context()
+    app.plugin(memory)
+    plugin.registerMaiDatabaseModels(app)
+    await app.start()
+    const music = createMusic()
+    const data = {
+      musics: new Map([[music.id, music]]),
+      courses: new Map(),
+      icons: new Map(),
+      plates: new Map(),
+      coverPath: () => plugin.resolvePackageAssetPath('fallback/cover.png'),
+    }
+    const valid = createRestoredClassicalRow('mock:channel:partial')
+    const invalid = { ...createRestoredOpeningRow('mock:channel:invalid'), status: {} }
+    let ownedService: plugin.GuessService | undefined
+    let partialRuntime: { timer?: unknown } | undefined
+    const repositoryRestore = vi.spyOn(plugin.GuessRepository.prototype, 'restore')
+      .mockResolvedValue([valid, invalid] as any)
+    const repositoryRemove = vi.spyOn(plugin.GuessRepository.prototype, 'remove')
+      .mockImplementation(async (contextId: string) => {
+        if (contextId === invalid.contextId) {
+          partialRuntime = [...(Reflect.get(ownedService!, 'active') as Map<string, any>).values()][0]
+          throw new Error('restore cleanup failed')
+        }
+      })
+    const originalRestore = plugin.GuessService.prototype.restore
+    const serviceRestore = vi.spyOn(plugin.GuessService.prototype, 'restore')
+      .mockImplementation(function (this: plugin.GuessService) {
+        ownedService = this
+        return originalRestore.call(this)
+      })
+
+    try {
+      await expect(plugin.createDefaultCommandDependencies(
+        app,
+        { config: createConfig(), publicBaseUrl: '' },
+        {
+          dataSync: { startup: vi.fn(async () => data) } as any,
+          renderer: new plugin.TakumiRenderService({ concurrency: 1, queueLimit: 4 }),
+        },
+      )).rejects.toThrow('restore cleanup failed')
+
+      expect(ownedService).toBeDefined()
+      expect(ownedService?.hasActiveGame(valid.contextId)).toBe(false)
+      expect(partialRuntime?.timer).toBeUndefined()
+      expect(repositoryRemove).toHaveBeenCalledWith(valid.contextId)
+    } finally {
+      await ownedService?.dispose().catch(() => undefined)
+      serviceRestore.mockRestore()
+      repositoryRemove.mockRestore()
+      repositoryRestore.mockRestore()
       await app.stop()
     }
   })

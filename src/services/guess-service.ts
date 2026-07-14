@@ -1,6 +1,7 @@
 import { MusicDifficulty, MusicGenre, MusicType } from '../domain/enums'
 import type { MusicInfo } from '../domain/music'
 import type { Awaitable } from '../types'
+import { normalizeSearchText } from '../utils/strings'
 
 export const CLASSICAL_HINT_COUNT = 6
 export const CLASSICAL_HINT_COOLDOWN_MS = 10_000
@@ -153,46 +154,61 @@ function isClassicalStatus(value: unknown): value is ClassicalGuessStatus {
   const validDeadline = phase === 'finished'
     ? value.nextAt === null
     : finiteNumber(value.nextAt)
+  const hintIndex = Number(value.hintIndex)
+  const validPhaseCounter = phase === 'crop'
+    ? hintIndex === CLASSICAL_HINT_COUNT
+    : hintIndex >= 1 && hintIndex <= CLASSICAL_HINT_COUNT
   return value.version === 1
     && ['hints', 'crop', 'finished'].includes(phase)
     && typeof value.gameId === 'string'
+    && value.gameId.length > 0
     && Number.isSafeInteger(value.musicId)
     && Array.isArray(value.hints)
     && value.hints.length === CLASSICAL_HINT_COUNT
     && value.hints.every(hint => typeof hint === 'string')
     && Number.isSafeInteger(value.hintIndex)
-    && Number(value.hintIndex) >= 0
-    && Number(value.hintIndex) <= CLASSICAL_HINT_COUNT
+    && validPhaseCounter
     && validDeadline
     && typeof value.seed === 'string'
+    && value.seed.length > 0
 }
 
 function isOpeningStatus(value: unknown): value is OpeningGuessStatus {
   if (!isPlainObject(value)) return false
-  return value.version === 1
-    && ['playing', 'finished'].includes(String(value.phase))
-    && typeof value.gameId === 'string'
-    && Array.isArray(value.musics)
-    && value.musics.length > 0
-    && value.musics.length <= OPENING_MAX_SONGS
-    && value.musics.every(item => (
+  const phase = String(value.phase)
+  if (value.version !== 1
+    || !['playing', 'finished'].includes(phase)
+    || typeof value.gameId !== 'string'
+    || value.gameId.length === 0
+    || !Array.isArray(value.musics)
+    || value.musics.length === 0
+    || value.musics.length > OPENING_MAX_SONGS
+    || !value.musics.every(item => (
       isPlainObject(item)
       && Number.isSafeInteger(item.musicId)
       && typeof item.revealed === 'boolean'
     ))
-    && Array.isArray(value.opened)
-    && value.opened.length <= OPENING_MAX_LETTERS
-    && value.opened.every(character => typeof character === 'string' && Array.from(character).length === 1)
+    || !Array.isArray(value.opened)
+    || value.opened.length > OPENING_MAX_LETTERS
+  ) return false
+  const musicIds = value.musics.map(item => item.musicId)
+  if (new Set(musicIds).size !== musicIds.length) return false
+  const opened = value.opened as unknown[]
+  const normalizedOpened = opened.map(character => (
+    typeof character === 'string' ? normalizeCharacter(character) : ''
+  ))
+  if (normalizedOpened.some((character, index) => (
+    character !== opened[index]
+    || !character.trim()
+    || Array.from(character).length !== 1
+  ))) return false
+  if (new Set(normalizedOpened).size !== normalizedOpened.length) return false
+  const allRevealed = value.musics.every(item => item.revealed)
+  return phase === 'finished' ? allRevealed : !allRevealed
 }
 
 function normalizeCharacter(character: string) {
-  const codePoint = character.codePointAt(0)
-  if (codePoint === undefined) return ''
-  if (codePoint === 0x3000) return ' '
-  if (codePoint >= 0xff01 && codePoint <= 0xff5e) {
-    return String.fromCodePoint(codePoint - 0xfee0).toLocaleLowerCase()
-  }
-  return character.toLocaleLowerCase()
+  return character.normalize('NFKC').toLocaleLowerCase()
 }
 
 function shuffleStable<T>(values: readonly T[], random: () => number) {
@@ -225,6 +241,8 @@ export class GuessService {
   private readonly active = new Map<string, ActiveGuessGame>()
   private readonly starting = new Set<string>()
   private readonly operationTails = new Map<string, Promise<void>>()
+  private readonly acceptedTransitions = new Set<Promise<unknown>>()
+  private lifecycleAdmission: Promise<void> = Promise.resolve()
   private readonly random: () => number
   private readonly now: () => Date
   private readonly timers: GuessTimerPort
@@ -251,9 +269,10 @@ export class GuessService {
   }
 
   async handleMessage(message: GuessMessage): Promise<GuessHandleResult> {
-    const runtime = this.active.get(message.contextId)
-    if (!runtime) return { consumed: false, action: 'inactive' }
-    return this.serialized(message.contextId, async () => {
+    return this.acceptTransition(async () => {
+      const runtime = this.active.get(message.contextId)
+      if (!runtime) return { consumed: false, action: 'inactive' }
+      return this.serialized(message.contextId, async () => {
       const current = this.active.get(message.contextId)
       if (!current || current.token !== runtime.token) {
         return { consumed: false, action: 'inactive' }
@@ -264,22 +283,26 @@ export class GuessService {
         await this.stopForUser(current)
         return { consumed: true, action: 'stopped' }
       }
-      if (current.type === 'classical') return this.handleClassical(current, content)
-      return this.handleOpening(current, content)
+        if (current.type === 'classical') return this.handleClassical(current, content)
+        return this.handleOpening(current, content)
+      })
     })
   }
 
   async stop(contextId: string): Promise<boolean> {
-    return this.serialized(contextId, async () => {
-      const runtime = this.active.get(contextId)
-      if (!runtime) return false
-      await this.removeRuntime(runtime)
-      return true
-    })
+    return this.acceptTransition(() => (
+      this.serialized(contextId, async () => {
+        const runtime = this.active.get(contextId)
+        if (!runtime) return false
+        await this.removeRuntime(runtime)
+        return true
+      })
+    ))
   }
 
   async restore() {
-    this.disposed = false
+    return this.exclusiveTransition(async () => {
+      if (this.disposed) return 0
     const activeContexts = [...this.active.keys()]
     await Promise.all(activeContexts.map(contextId => this.serialized(contextId, async () => {
       const runtime = this.active.get(contextId)
@@ -341,41 +364,45 @@ export class GuessService {
       }
       await this.options.repository.remove(row.contextId)
     }
-    return restored
+      return restored
+    })
   }
 
   async dispose() {
     this.disposed = true
-    const ownedContexts = [...new Set([...this.active.keys(), ...this.starting])]
-    await Promise.all(ownedContexts.map(contextId => this.serialized(contextId, async () => {
-      const runtime = this.active.get(contextId)
-      if (!runtime) return
-      this.active.delete(contextId)
-      this.detachRuntime(runtime)
-      await this.options.repository.remove(contextId)
-    })))
-    this.starting.clear()
+    await this.exclusiveTransition(async () => {
+      const ownedContexts = [...new Set([...this.active.keys(), ...this.starting])]
+      await Promise.all(ownedContexts.map(contextId => this.serialized(contextId, async () => {
+        const runtime = this.active.get(contextId)
+        if (!runtime) return
+        this.active.delete(contextId)
+        this.detachRuntime(runtime)
+        await this.options.repository.remove(contextId)
+      })))
+      this.starting.clear()
+    })
   }
 
   private async start(
     type: GuessGameType,
     interaction: GuessInteraction,
   ): Promise<GuessStartResult> {
-    if (this.disposed) return { ok: false, reason: 'unavailable' }
-    if (this.active.has(interaction.contextId) || this.starting.has(interaction.contextId)) {
-      return { ok: false, reason: 'active' }
-    }
-    this.starting.add(interaction.contextId)
-    return this.serialized(interaction.contextId, async () => {
-      try {
+    return this.acceptTransition(() => (
+      this.serialized(interaction.contextId, async () => {
         if (this.disposed) return { ok: false, reason: 'unavailable' }
-        return type === 'classical'
-          ? await this.startClassicalGame(interaction)
-          : await this.startOpeningGame(interaction)
-      } finally {
-        this.starting.delete(interaction.contextId)
-      }
-    })
+        if (this.active.has(interaction.contextId) || this.starting.has(interaction.contextId)) {
+          return { ok: false, reason: 'active' }
+        }
+        this.starting.add(interaction.contextId)
+        try {
+          return type === 'classical'
+            ? await this.startClassicalGame(interaction)
+            : await this.startOpeningGame(interaction)
+        } finally {
+          this.starting.delete(interaction.contextId)
+        }
+      })
+    ))
   }
 
   private async startClassicalGame(interaction: GuessInteraction): Promise<GuessStartResult> {
@@ -504,7 +531,7 @@ export class GuessService {
     if (!content) return { consumed: true, action: 'ignored' }
     const status = runtime.status as ClassicalGuessStatus
     const answers = await this.options.aliasService.search(content)
-    if (!answers.slice(0, 10).some(answer => answer.id === status.musicId)) {
+    if (!this.matchesAnswerTitle(status.musicId, answers)) {
       return { consumed: true, action: 'ignored' }
     }
     await this.finishClassical(runtime, '恭喜你猜中了哦~')
@@ -518,14 +545,14 @@ export class GuessService {
     const status = runtime.status as OpeningGuessStatus
     const letterMatch = content.match(/^开字母(?:\s+(.*))?$/u)
     if (letterMatch) {
-      const characters = Array.from((letterMatch[1] ?? '').trim())
-      if (characters.length !== 1 || !characters[0].trim()) {
+      const rawCharacter = (letterMatch[1] ?? '').trim()
+      const character = normalizeCharacter(rawCharacter)
+      if (Array.from(character).length !== 1 || !character.trim()) {
         await runtime.reply(textReply('请在“开字母”后输入一个字符。'))
         return { consumed: true, action: 'invalid' }
       }
-      const character = normalizeCharacter(characters[0])
       if (status.opened.includes(character)) {
-        await runtime.reply(textReply(`字母“${characters[0]}”已经开过了！`))
+        await runtime.reply(textReply(`字母“${rawCharacter}”已经开过了！`))
         return { consumed: true, action: 'invalid' }
       }
       if (status.opened.length >= OPENING_MAX_LETTERS) {
@@ -552,8 +579,9 @@ export class GuessService {
         await runtime.reply(textReply('歌曲不存在！'))
         return { consumed: true, action: 'invalid' }
       }
-      const answerIds = new Set(answers.slice(0, 10).map(music => music.id))
-      const index = status.musics.findIndex(item => answerIds.has(item.musicId))
+      const index = status.musics.findIndex(item => (
+        this.matchesAnswerTitle(item.musicId, answers)
+      ))
       if (index < 0) {
         await runtime.reply(textReply('歌曲不在题目列表中！'))
         return { consumed: true, action: 'invalid' }
@@ -570,8 +598,9 @@ export class GuessService {
 
     if (!content) return { consumed: true, action: 'ignored' }
     const answers = await this.options.aliasService.search(content)
-    const answerIds = new Set(answers.slice(0, 10).map(music => music.id))
-    const index = status.musics.findIndex(item => !item.revealed && answerIds.has(item.musicId))
+    const index = status.musics.findIndex(item => (
+      !item.revealed && this.matchesAnswerTitle(item.musicId, answers)
+    ))
     if (index < 0) return { consumed: true, action: 'ignored' }
     const musics = status.musics.map((item, itemIndex) => (
       itemIndex === index ? { ...item, revealed: true } : { ...item }
@@ -609,6 +638,13 @@ export class GuessService {
     return Array.from(music.name).every(character => (
       !character.trim() || openedSet.has(normalizeCharacter(character))
     ))
+  }
+
+  private matchesAnswerTitle(musicId: number, answers: readonly MusicInfo[]) {
+    const music = this.options.musics.get(musicId)
+    if (!music) return false
+    const title = normalizeSearchText(music.name)
+    return answers.slice(0, 10).some(answer => normalizeSearchText(answer.name) === title)
   }
 
   private openingBoard(status: OpeningGuessStatus, revealAll = false) {
@@ -684,12 +720,20 @@ export class GuessService {
     const delay = Math.max(0, status.nextAt - this.now().getTime())
     const token = runtime.token
     runtime.timer = this.timers.setTimeout(() => (
-      this.serialized(runtime.target.contextId, async () => {
-        const current = this.active.get(runtime.target.contextId)
-        if (!current || current.token !== token || current.type !== 'classical') return
-        current.timer = undefined
-        await this.advanceClassical(current)
-      }).catch(error => this.failScheduledRuntime(runtime.target.contextId, token, error))
+      this.acceptTransition(async () => {
+        try {
+          await this.serialized(runtime.target.contextId, async () => {
+            const current = this.active.get(runtime.target.contextId)
+            if (!current || current.token !== token || current.type !== 'classical') return
+            current.timer = undefined
+            await this.advanceClassical(current)
+          })
+        } catch (error) {
+          await this.serialized(runtime.target.contextId, () => (
+            this.failScheduledRuntime(runtime.target.contextId, token, error)
+          ))
+        }
+      })
     ), delay)
   }
 
@@ -774,6 +818,39 @@ export class GuessService {
     if (current) this.active.delete(runtime.target.contextId)
     this.detachRuntime(runtime)
     await this.options.repository.remove(runtime.target.contextId)
+  }
+
+  private acceptTransition<T>(operation: () => Promise<T>): Promise<T> {
+    const admission = this.lifecycleAdmission
+    const transition = (async () => {
+      await admission
+      return operation()
+    })()
+    this.acceptedTransitions.add(transition)
+    void transition.then(
+      () => this.acceptedTransitions.delete(transition),
+      () => this.acceptedTransitions.delete(transition),
+    )
+    return transition
+  }
+
+  private exclusiveTransition<T>(operation: () => Promise<T>): Promise<T> {
+    const priorAdmission = this.lifecycleAdmission
+    const acceptedBefore = [...this.acceptedTransitions]
+    let release!: () => void
+    const gate = new Promise<void>(resolve => {
+      release = resolve
+    })
+    this.lifecycleAdmission = priorAdmission.then(() => gate)
+    return (async () => {
+      await priorAdmission
+      await Promise.allSettled(acceptedBefore)
+      try {
+        return await operation()
+      } finally {
+        release()
+      }
+    })()
   }
 
   private async serialized<T>(contextId: string, operation: () => Promise<T>): Promise<T> {

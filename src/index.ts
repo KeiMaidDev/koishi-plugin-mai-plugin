@@ -189,7 +189,18 @@ export async function createDefaultCommandDependencies(
     random: Math.random,
     logger: ctx.logger(PLUGIN_NAME),
   })
-  await guessService.restore()
+  try {
+    await guessService.restore()
+  } catch (error) {
+    try {
+      await guessService.dispose()
+    } catch (cleanupError) {
+      ctx.logger(PLUGIN_NAME).warn(
+        `[mai-plugin] failed to dispose guessing service after restore failure: ${String(cleanupError)}`,
+      )
+    }
+    throw error
+  }
   const previewDirectory = join(runtime.config.resourceSync.cacheDir, 'preview')
 
   return {

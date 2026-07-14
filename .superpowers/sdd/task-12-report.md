@@ -13,6 +13,14 @@
 - Reused Task 10 reply helpers for QQ native Markdown and standard image/text fallback. Ambiguous delivery failures are not retried.
 - Registered the guessing commands and one middleware listener through the core lifecycle. Default dependencies restore persisted games, and lifecycle disposal removes commands, middleware, timers, and rows.
 
+## Review Follow-up
+
+- Added a lifecycle admission gate that tracks accepted transitions through repository deletion. Restore and disposal are exclusive, so disposal waits for blocked removals and restore cannot race later starts or stops.
+- Disposal is permanent. Restore after disposal returns without reading persistence, and disposal queued during restore removes every partially attached runtime and timer.
+- Default dependency initialization now disposes its locally owned guessing service when restore fails, including failures after an earlier row attached.
+- Alias answers now compare normalized resolved music titles, matching SD/DX chart variants with the same title in classical, free-answer, and `开歌` flows.
+- Group settings now use `platform:channel` identities, opening letters are normalized before one-code-point validation, and restore rejects duplicate songs, malformed opened letters, and impossible phase/counter combinations.
+
 ## TDD Evidence
 
 - First RED: the focused integration test failed because `GuessService` was not exported. The minimal concurrent admission/persistence slice made it green.
@@ -20,15 +28,18 @@
 - Rendering RED/GREEN added real concurrent Takumi PNG output, deterministic crop bytes, final output, and fallback-cover loading.
 - Command RED/GREEN added real Koishi middleware routing, exact command consumption, group permissions/isolation, private behavior, QQ rich/fallback output, core registration, default restore, and disposal.
 - Hardening RED/GREEN cycles covered an in-flight timer during disposal, in-flight start during disposal, malformed restored deadlines, post-disposal starts, replacement ordering during database removal, and ambiguous send retry prevention.
+- Review RED cycle 1 failed 5/23 tests for blocked removal disposal and restore/start/stop/dispose ordering; the lifecycle admission gate made all 23 pass.
+- Review RED cycle 2 failed 5/27 tests for SD/DX title aliases, lowercase expansion, restore validation, platform settings, and partial initialization cleanup; the scoped fixes made all 27 pass.
 
 ## Verification
 
 | Check | Result |
 | --- | --- |
-| Focused Task 12 | Passed, 18/18 |
-| Affected suites, single worker | Passed, 287/287 across 7 files |
+| Focused Task 12 | Passed, 27/27 |
+| Affected suites, single worker | 291/292 passed; only `package.spec.ts` failed on Windows `EPERM` renaming a fresh temp directory inside the actively watched `C:\koishi-app` tree |
 | Production build | Passed: TypeScript declarations and Vite build, 55 modules |
-| Full suite | Passed, 591/591 across 16 files |
+| Full suite, exact command | 599/600 passed; same environment-only package temp-directory rename failure |
+| Full suite excluding package import harness | Passed, 599/599 across 15 files |
 | Package dry-run | Passed, 73 entries; new guess command/service/render declarations included |
 | Forbidden rendering dependency scan | No Sharp, Canvas, browser, or HTML use in Task 12 files |
 
@@ -36,4 +47,4 @@
 
 - No arcade queue or OAuth routes were added.
 - No external network calls or browser dependencies were added.
-- The pre-existing untracked `data/` directory was preserved and excluded from the commit.
+- The generated worktree-local `data/` snapshot was resolved under the isolated worktree, inspected, and removed before commit; no unrelated files were deleted.

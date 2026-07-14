@@ -1,5 +1,6 @@
 import type { Command, Context, Fragment, Middleware, Session } from 'koishi'
 import { registerCalcCommands } from './calc'
+import { registerGuessCommands } from './guess'
 import { registerHelpCommand } from './help'
 import { registerImageCommands } from './image'
 import { registerMusicCommands } from './music'
@@ -176,7 +177,7 @@ export function createCompatibilityMiddleware(
 
 export interface CoreCommandRegistration {
   readonly commands: readonly Command[]
-  dispose(): void
+  dispose(): Promise<void>
 }
 
 function callbackPermissions(session: Session) {
@@ -216,7 +217,16 @@ export function registerCoreCommands(
           if (execution) await session.execute(execution)
         },
       }
-  const commands = [
+  const guessRegistration = dependencies.guessService && dependencies.settingRepository
+    ? registerGuessCommands(ctx, {
+        guessService: dependencies.guessService,
+        settingRepository: dependencies.settingRepository,
+        settingService: dependencies.settingService,
+        administrators: dependencies.administrators,
+        compatibilityMode: dependencies.compatibilityMode,
+      })
+    : undefined
+  const regularCommands = [
     registerHelpCommand(ctx, commandDependencies),
     ...registerSettingsCommands(ctx, commandDependencies),
     ...registerMusicCommands(ctx, commandDependencies),
@@ -224,6 +234,7 @@ export function registerCoreCommands(
     ...registerRecordCommands(ctx, commandDependencies),
     ...registerCalcCommands(ctx, commandDependencies),
   ]
+  const commands = [...(guessRegistration?.commands ?? []), ...regularCommands]
   const disposeMiddleware = ctx.middleware(createCompatibilityMiddleware(commandDependencies))
   const disposeCallbacks = ctx.on('interaction/button', session => (
     dispatchButtonCallback(session, commandDependencies)
@@ -232,13 +243,14 @@ export function registerCoreCommands(
 
   return {
     commands,
-    dispose() {
+    async dispose() {
       if (disposed) return
       disposed = true
       disposeMiddleware()
       disposeCallbacks()
-      for (const command of [...commands].reverse()) command.dispose()
+      for (const command of [...regularCommands].reverse()) command.dispose()
       dependencies.callbackRouter.clear()
+      await guessRegistration?.dispose()
     },
   } satisfies CoreCommandRegistration
 }

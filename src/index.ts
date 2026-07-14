@@ -1,4 +1,5 @@
 import type { Context } from 'koishi'
+import h from '@satorijs/element'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Config, ConfigSchema } from './config'
@@ -17,11 +18,13 @@ import { DivingFishProvider } from './providers/diving-fish'
 import { LxnsProvider } from './providers/lxns'
 import { ProviderChain } from './providers/provider-chain'
 import { TakumiMaiRenderer } from './render/mai-renderer'
+import { TakumiGuessRenderer } from './render/guess-template'
 import {
   connectDataSyncAssetInvalidation,
   TakumiRenderService,
 } from './render/renderer'
 import { AliasService } from './services/alias-service'
+import { GuessService, type GuessReply, type GuessTarget } from './services/guess-service'
 import { QqBindingRequiredError, QueryService } from './services/query-service'
 import { SettingService } from './services/setting-service'
 import type { Awaitable, LifecycleContext, LifecycleSteps, PluginContext } from './types'
@@ -50,10 +53,12 @@ export * from './query/combo-parser'
 export * from './query/combo-rules'
 export * from './query/combo-executor'
 export * from './services/alias-service'
+export * from './services/guess-service'
 export * from './services/query-service'
 export * from './services/setting-service'
 export * from './commands/calc'
 export * from './commands/core'
+export * from './commands/guess'
 export * from './commands/help'
 export * from './commands/image'
 export * from './commands/music'
@@ -66,6 +71,7 @@ export * from './platform/fallback-message'
 export * from './platform/qq-message'
 export * from './render/assets'
 export * from './render/course-template'
+export * from './render/guess-template'
 export * from './render/level-template'
 export * from './render/mai-renderer'
 export * from './render/nodes'
@@ -159,14 +165,41 @@ export async function createDefaultCommandDependencies(
     providerChain,
     settings: settingService,
   })
+  const aliasService = new AliasService(data, repositories)
+  const guessService = new GuessService({
+    musics: data.musics,
+    repository: repositories.guess,
+    aliasService,
+    renderer: new TakumiGuessRenderer(services.renderer, data),
+    send: async (target: GuessTarget, reply: GuessReply) => {
+      const bot = ctx.bots.find(candidate => candidate.platform === target.platform)
+      if (!bot) {
+        throw new Error(`[mai-plugin] no ${target.platform} bot is available to restore guessing game output.`)
+      }
+      const content = reply.type === 'text'
+        ? h.text(reply.text)
+        : [h.image(reply.image, 'image/png'), h.text(reply.text)]
+      if (target.direct) {
+        await bot.sendPrivateMessage(target.userId, content)
+      } else {
+        await bot.sendMessage(target.channelId, content)
+      }
+    },
+    now: () => new Date(),
+    random: Math.random,
+    logger: ctx.logger(PLUGIN_NAME),
+  })
+  await guessService.restore()
   const previewDirectory = join(runtime.config.resourceSync.cacheDir, 'preview')
 
   return {
     data,
-    aliasService: new AliasService(data, repositories),
+    aliasService,
     queryService,
     settingService,
     bindRepository: repositories.bind,
+    guessService,
+    settingRepository: repositories.setting,
     renderer: new TakumiMaiRenderer(services.renderer, data),
     callbackRouter: new CommandCallbackRouter(),
     administrators: runtime.config.administrators,
@@ -247,9 +280,9 @@ export function createDefaultLifecycle(
     clearWaitingQueue() {
       state.renderer?.clearWaitingQueue(new Error('[mai-plugin] renderer queue cleared'))
     },
-    releaseCallbackState() {
+    async releaseCallbackState() {
       try {
-        state.commandRegistration?.dispose()
+        await state.commandRegistration?.dispose()
       } finally {
         state.commandRegistration = undefined
         state.disconnectInvalidation?.()

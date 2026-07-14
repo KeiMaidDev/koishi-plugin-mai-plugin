@@ -1,7 +1,7 @@
 import h from '@satorijs/element'
 import type { Command, Context, Fragment, Session } from 'koishi'
 import type { CourseInfo, IconInfo, PlateInfo } from '../data/normalizers'
-import type { BindRepository } from '../database/repositories'
+import type { BindRepository, SettingRepository } from '../database/repositories'
 import type { MusicInfo } from '../domain/music'
 import { createQqNativeMarkdown } from '../platform/qq-message'
 import { sendReply } from '../platform/qq-message'
@@ -10,6 +10,7 @@ import type { MaiRenderer } from '../render/mai-renderer'
 import type { AliasService } from '../services/alias-service'
 import type { QueryService } from '../services/query-service'
 import type { SettingService } from '../services/setting-service'
+import type { GuessService } from '../services/guess-service'
 import type { Awaitable } from '../types'
 import type { Semaphore } from '../utils/semaphore'
 
@@ -43,6 +44,11 @@ export interface CoreCommandDependencies {
     | 'setDefaultGame'
   >
   bindRepository: Pick<BindRepository, 'setQq'>
+  guessService?: Pick<
+    GuessService,
+    'startClassical' | 'startOpening' | 'handleMessage' | 'hasActiveGame' | 'dispose'
+  >
+  settingRepository?: Pick<SettingRepository, 'get' | 'set'>
   renderer: MaiRenderer
   callbackRouter: CommandCallbackRouter
   administrators?: readonly string[]
@@ -53,6 +59,11 @@ export interface CoreCommandDependencies {
   replayCommand?: (session: Session, command: string) => Awaitable<void>
   compatibilityPlatforms?: readonly string[]
   regexWorkerSemaphore?: Semaphore
+}
+
+export interface ReplyCommandDependencies {
+  settingService?: Pick<SettingService, 'isCompatibilityMode'>
+  compatibilityMode?: boolean
 }
 
 export type CoreCommandContext = Pick<Context, 'command'>
@@ -86,7 +97,7 @@ export function commandAction(
 
 export async function compatibilityModeFor(
   session: ActiveCommandSession,
-  dependencies: CoreCommandDependencies,
+  dependencies: ReplyCommandDependencies,
 ) {
   if (dependencies.compatibilityMode) return true
   return dependencies.settingService?.isCompatibilityMode(session.userId) ?? false
@@ -94,7 +105,7 @@ export async function compatibilityModeFor(
 
 export async function replyText(
   session: ActiveCommandSession,
-  dependencies: CoreCommandDependencies,
+  dependencies: ReplyCommandDependencies,
   text: string,
   rich = createQqNativeMarkdown(text),
 ) {
@@ -108,7 +119,7 @@ export async function replyText(
 
 export async function replyImage(
   session: ActiveCommandSession,
-  dependencies: CoreCommandDependencies,
+  dependencies: ReplyCommandDependencies,
   image: Buffer | Uint8Array,
   text = '',
   rich?: h,

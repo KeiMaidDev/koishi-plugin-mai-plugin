@@ -36,12 +36,13 @@
 | Check | Result |
 | --- | --- |
 | Focused Task 12 | Passed, 27/27 |
-| Affected suites, single worker | 291/292 passed; only `package.spec.ts` failed on Windows `EPERM` renaming a fresh temp directory inside the actively watched `C:\koishi-app` tree |
+| Affected suites, single worker | Passed, 292/292 across 7 files |
 | Production build | Passed: TypeScript declarations and Vite build, 55 modules |
-| Full suite, exact command | 599/600 passed; same environment-only package temp-directory rename failure |
-| Full suite excluding package import harness | Passed, 599/599 across 15 files |
+| Full suite, exact command | Passed, 600/600 across 16 files |
 | Package dry-run | Passed, 73 entries; new guess command/service/render declarations included |
 | Forbidden rendering dependency scan | No Sharp, Canvas, browser, or HTML use in Task 12 files |
+
+The package import harness now uses the system temporary directory with explicit dependency links, avoiding Windows watcher locks without relying on ancestor `node_modules` resolution.
 
 ## Scope Check
 

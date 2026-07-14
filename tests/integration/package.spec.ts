@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
-import { mkdtemp, mkdir, readFile, rename, rm } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdtemp, mkdir, readFile, rename, rm, symlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -26,7 +27,7 @@ describe('published package entry', () => {
 
     const npmCli = process.env.npm_execpath
     if (!npmCli) throw new Error('npm_execpath is unavailable')
-    const temporary = await mkdtemp(join(projectRoot, '.pack-import-'))
+    const temporary = await mkdtemp(join(tmpdir(), 'mai-plugin-pack-import-'))
     temporaryDirectories.push(temporary)
     const packedDirectory = join(temporary, 'packed')
     const extractedDirectory = join(temporary, 'extracted')
@@ -73,6 +74,18 @@ describe('published package entry', () => {
       extractedDirectory,
     ])
     await rename(join(extractedDirectory, 'package'), installedDirectory)
+
+    const dependencyNames = [
+      ...Object.keys(packageJson.dependencies ?? {}),
+      ...Object.keys(packageJson.peerDependencies ?? {}),
+    ]
+    for (const name of dependencyNames) {
+      const segments = name.split('/')
+      const target = join(projectRoot, 'node_modules', ...segments)
+      const link = join(temporary, 'node_modules', ...segments)
+      await mkdir(dirname(link), { recursive: true })
+      await symlink(target, link, process.platform === 'win32' ? 'junction' : 'dir')
+    }
 
     const script = `
       const plugin = await import(${JSON.stringify(packageJson.name)});

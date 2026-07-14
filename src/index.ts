@@ -26,6 +26,7 @@ import {
 import { AliasService } from './services/alias-service'
 import { GuessService, type GuessReply, type GuessTarget } from './services/guess-service'
 import { QqBindingRequiredError, QueryService } from './services/query-service'
+import { QueueService } from './services/queue-service'
 import { SettingService } from './services/setting-service'
 import type { Awaitable, LifecycleContext, LifecycleSteps, PluginContext } from './types'
 
@@ -55,6 +56,7 @@ export * from './query/combo-executor'
 export * from './services/alias-service'
 export * from './services/guess-service'
 export * from './services/query-service'
+export * from './services/queue-service'
 export * from './services/setting-service'
 export * from './commands/calc'
 export * from './commands/core'
@@ -62,6 +64,7 @@ export * from './commands/guess'
 export * from './commands/help'
 export * from './commands/image'
 export * from './commands/music'
+export * from './commands/queue'
 export * from './commands/record'
 export * from './commands/settings'
 export * from './commands/support'
@@ -166,6 +169,8 @@ export async function createDefaultCommandDependencies(
     settings: settingService,
   })
   const aliasService = new AliasService(data, repositories)
+  const now = () => new Date()
+  const queueService = new QueueService(repositories.arcade, { now })
   const guessService = new GuessService({
     musics: data.musics,
     repository: repositories.guess,
@@ -185,7 +190,7 @@ export async function createDefaultCommandDependencies(
         await bot.sendMessage(target.channelId, content)
       }
     },
-    now: () => new Date(),
+    now,
     random: Math.random,
     logger: ctx.logger(PLUGIN_NAME),
   })
@@ -209,13 +214,14 @@ export async function createDefaultCommandDependencies(
     queryService,
     settingService,
     bindRepository: repositories.bind,
+    queueService,
     guessService,
     settingRepository: repositories.setting,
     renderer: new TakumiMaiRenderer(services.renderer, data),
     callbackRouter: new CommandCallbackRouter(),
     administrators: runtime.config.administrators,
     compatibilityMode: runtime.config.compatibilityMode,
-    now: () => new Date(),
+    now,
     random: Math.random,
     async previewAudio(music) {
       try {

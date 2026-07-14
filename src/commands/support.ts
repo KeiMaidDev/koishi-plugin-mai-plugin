@@ -9,6 +9,7 @@ import type { CommandCallbackRouter } from '../platform/command-router'
 import type { MaiRenderer } from '../render/mai-renderer'
 import type { AliasService } from '../services/alias-service'
 import type { QueryService } from '../services/query-service'
+import type { QueueService } from '../services/queue-service'
 import type { SettingService } from '../services/setting-service'
 import type { GuessService } from '../services/guess-service'
 import type { Awaitable } from '../types'
@@ -49,6 +50,16 @@ export interface CoreCommandDependencies {
     'startClassical' | 'startOpening' | 'handleMessage' | 'hasActiveGame' | 'dispose'
   >
   settingRepository?: Pick<SettingRepository, 'get' | 'set'>
+  queueService?: Pick<
+    QueueService,
+    | 'addArcade'
+    | 'deleteArcade'
+    | 'addAlias'
+    | 'deleteAlias'
+    | 'aliases'
+    | 'bindGroup'
+    | 'handleMessage'
+  >
   renderer: MaiRenderer
   callbackRouter: CommandCallbackRouter
   administrators?: readonly string[]

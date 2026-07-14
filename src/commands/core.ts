@@ -4,6 +4,7 @@ import { registerGuessCommands } from './guess'
 import { registerHelpCommand } from './help'
 import { registerImageCommands } from './image'
 import { registerMusicCommands } from './music'
+import { registerQueueCommands } from './queue'
 import { registerRecordCommands } from './record'
 import { registerSettingsCommands } from './settings'
 import type { CoreCommandDependencies } from './support'
@@ -226,6 +227,14 @@ export function registerCoreCommands(
         compatibilityMode: dependencies.compatibilityMode,
       })
     : undefined
+  const queueRegistration = dependencies.queueService
+    ? registerQueueCommands(ctx, {
+        queueService: dependencies.queueService,
+        settingService: dependencies.settingService,
+        administrators: dependencies.administrators,
+        compatibilityMode: dependencies.compatibilityMode,
+      })
+    : undefined
   const regularCommands = [
     registerHelpCommand(ctx, commandDependencies),
     ...registerSettingsCommands(ctx, commandDependencies),
@@ -234,7 +243,11 @@ export function registerCoreCommands(
     ...registerRecordCommands(ctx, commandDependencies),
     ...registerCalcCommands(ctx, commandDependencies),
   ]
-  const commands = [...(guessRegistration?.commands ?? []), ...regularCommands]
+  const commands = [
+    ...(guessRegistration?.commands ?? []),
+    ...(queueRegistration?.commands ?? []),
+    ...regularCommands,
+  ]
   const disposeMiddleware = ctx.middleware(createCompatibilityMiddleware(commandDependencies))
   const disposeCallbacks = ctx.on('interaction/button', session => (
     dispatchButtonCallback(session, commandDependencies)
@@ -250,6 +263,7 @@ export function registerCoreCommands(
       disposeCallbacks()
       for (const command of [...regularCommands].reverse()) command.dispose()
       dependencies.callbackRouter.clear()
+      await queueRegistration?.dispose()
       await guessRegistration?.dispose()
     },
   } satisfies CoreCommandRegistration

@@ -285,6 +285,47 @@ export interface ArcadeSnapshot {
   modifiedAt: Date
 }
 
+export type ArcadeCountMutation =
+  | { type: 'set', value: number }
+  | { type: 'adjust', value: number }
+
+export type ArcadeCountMutationResult =
+  | { type: 'updated', arcade: ArcadeSnapshot }
+  | { type: 'too-large' }
+
+export const ARCADE_NO_UPDATES_AT_MS = new Date(2000, 0, 1, 0, 0, 0, 0).getTime()
+
+function arcadeNoUpdatesAt() {
+  return new Date(ARCADE_NO_UPDATES_AT_MS)
+}
+
+function sameLocalDay(left: Date, right: Date) {
+  return left.getFullYear() === right.getFullYear()
+    && left.getMonth() === right.getMonth()
+    && left.getDate() === right.getDate()
+}
+
+function shouldResetArcade(arcade: MaiArcade, currentTime: Date) {
+  return arcade.modifiedAt.getTime() !== ARCADE_NO_UPDATES_AT_MS
+    && !sameLocalDay(arcade.modifiedAt, currentTime)
+}
+
+export type ArcadeRepositoryErrorCode =
+  | 'group-not-found'
+  | 'arcade-not-found'
+  | 'arcade-exists'
+  | 'alias-exists'
+
+export class ArcadeRepositoryError extends Error {
+  constructor(
+    readonly code: ArcadeRepositoryErrorCode,
+    message: string,
+  ) {
+    super(message)
+    this.name = 'ArcadeRepositoryError'
+  }
+}
+
 export class ArcadeRepository {
   private readonly coordinator: RepositoryCoordinator
 
@@ -328,7 +369,12 @@ export class ArcadeRepository {
   async bind(channelId: string, groupName: string) {
     return this.coordinator.runArcade(`channel:${channelId}`, async () => {
       const [group] = await this.ctx.database.get('mai_arcade_group', { name: groupName })
-      if (!group) throw new Error(`[mai-plugin] arcade group "${groupName}" was not found.`)
+      if (!group) {
+        throw new ArcadeRepositoryError(
+          'group-not-found',
+          `[mai-plugin] arcade group "${groupName}" was not found.`,
+        )
+      }
       await this.ctx.database.upsert('mai_arcade_group_bind', [{
         channelId,
         groupId: group.id,
@@ -341,7 +387,10 @@ export class ArcadeRepository {
     const group = await this.getOrCreateGroup(channelId)
     return this.coordinator.runArcade(`group:${group.id}`, async () => {
       if (await this.findArcadeRow(group, name)) {
-        throw new Error(`[mai-plugin] arcade "${name}" already exists in this group.`)
+        throw new ArcadeRepositoryError(
+          'arcade-exists',
+          `[mai-plugin] arcade "${name}" already exists in this group.`,
+        )
       }
       const arcade = await this.ctx.database.create('mai_arcade', {
         groupId: group.id,
@@ -367,7 +416,10 @@ export class ArcadeRepository {
     return this.coordinator.runArcade(`group:${group.id}`, async () => {
       const arcade = await this.requireArcade(group, name)
       if (await this.findArcadeRow(group, alias)) {
-        throw new Error(`[mai-plugin] arcade alias "${alias}" already exists in this group.`)
+        throw new ArcadeRepositoryError(
+          'alias-exists',
+          `[mai-plugin] arcade alias "${alias}" already exists in this group.`,
+        )
       }
       const aliases = [...arcade.aliases, alias]
       await this.ctx.database.set('mai_arcade', { id: arcade.id }, { aliases })
@@ -390,11 +442,26 @@ export class ArcadeRepository {
     return [...(await this.requireArcade(group, name)).aliases]
   }
 
-  async list(channelId: string) {
+  async list(channelId: string, currentTime = new Date()) {
     const group = await this.findGroup(channelId)
     if (!group) return null
-    const rows = await this.ctx.database.get('mai_arcade', { groupId: group.id })
-    return rows.map(row => this.snapshot(row))
+    return this.coordinator.runArcade(`group:${group.id}`, async () => {
+      const rows = await this.ctx.database.get('mai_arcade', { groupId: group.id })
+      const snapshots: ArcadeSnapshot[] = []
+      for (const row of rows.sort((left, right) => left.id - right.id)) {
+        if (!shouldResetArcade(row, currentTime)) {
+          snapshots.push(this.snapshot(row))
+          continue
+        }
+        const modifiedAt = arcadeNoUpdatesAt()
+        await this.ctx.database.set('mai_arcade', { id: row.id }, {
+          value: 0,
+          modifiedAt,
+        })
+        snapshots.push(this.snapshot({ ...row, value: 0, modifiedAt }))
+      }
+      return snapshots
+    })
   }
 
   async find(channelId: string, name: string) {
@@ -430,15 +497,62 @@ export class ArcadeRepository {
     })
   }
 
+  async mutateCount(
+    channelId: string,
+    name: string,
+    mutation: ArcadeCountMutation,
+    modifiedAt = new Date(),
+    maximum = 50,
+  ): Promise<ArcadeCountMutationResult> {
+    const group = await this.requireGroup(channelId)
+    return this.coordinator.runArcade(`group:${group.id}`, async () => {
+      const arcade = await this.requireArcade(group, name)
+      const currentValue = shouldResetArcade(arcade, modifiedAt) ? 0 : arcade.value
+      const candidate = Math.trunc(
+        mutation.type === 'set'
+          ? mutation.value
+          : currentValue + mutation.value,
+      )
+      if (candidate > maximum) {
+        if (currentValue !== arcade.value) {
+          await this.ctx.database.set('mai_arcade', { id: arcade.id }, {
+            value: 0,
+            modifiedAt: arcadeNoUpdatesAt(),
+          })
+        }
+        return { type: 'too-large' }
+      }
+      const value = Math.max(0, candidate)
+      await this.ctx.database.set('mai_arcade', { id: arcade.id }, {
+        value,
+        modifiedAt,
+      })
+      return {
+        type: 'updated',
+        arcade: this.snapshot({ ...arcade, value, modifiedAt }),
+      }
+    })
+  }
+
   private async requireGroup(channelId: string) {
     const group = await this.findGroup(channelId)
-    if (!group) throw new Error(`[mai-plugin] arcade group for channel "${channelId}" was not found.`)
+    if (!group) {
+      throw new ArcadeRepositoryError(
+        'group-not-found',
+        `[mai-plugin] arcade group for channel "${channelId}" was not found.`,
+      )
+    }
     return group
   }
 
   private async requireArcade(group: MaiArcadeGroup, name: string) {
     const arcade = await this.findArcadeRow(group, name)
-    if (!arcade) throw new Error(`[mai-plugin] arcade "${name}" was not found.`)
+    if (!arcade) {
+      throw new ArcadeRepositoryError(
+        'arcade-not-found',
+        `[mai-plugin] arcade "${name}" was not found.`,
+      )
+    }
     return arcade
   }
 

@@ -119,6 +119,8 @@ function normalizeMessage(raw: string) {
   return compact(content).trim()
 }
 
+const MAX_QUEUE_MESSAGE_LENGTH = 96
+
 interface CountCandidate {
   arcade: ArcadeSnapshot
   mutation: { type: 'set' | 'adjust', value: number }
@@ -220,7 +222,7 @@ export class QueueService {
 
   async handleMessage(channelId: string, rawContent: string): Promise<QueueMessageResult | null> {
     const content = normalizeMessage(rawContent)
-    if (!content) return null
+    if (!content || content.length > MAX_QUEUE_MESSAGE_LENGTH) return null
     const now = this.options.now?.() ?? new Date()
     const arcades = await this.repository.list(channelId, now)
     const requestedName = queryName(content)

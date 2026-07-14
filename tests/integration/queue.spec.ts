@@ -191,6 +191,15 @@ describe('arcade queue service', () => {
     expect((await repositories.arcade.find('exactness', 'Second'))?.value).toBe(0)
   })
 
+  it('rejects oversized numeric messages before reading queue state', async () => {
+    const list = vi.spyOn(repositories.arcade, 'list')
+
+    await expect(
+      service.handleMessage('oversized', `jt${'9'.repeat(4096)}`),
+    ).resolves.toBeNull()
+    expect(list).not.toHaveBeenCalled()
+  })
+
   it('formats all and named queue queries with Kotlin relative update times', async () => {
     const now = new Date(2026, 6, 14, 12, 0, 0)
     service = new plugin.QueueService(repositories.arcade, { now: () => now })

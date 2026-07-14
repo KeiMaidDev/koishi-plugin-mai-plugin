@@ -264,6 +264,17 @@ describe('QQ native Markdown elements', () => {
     )
   })
 
+  it('escapes a trailing backslash before the generated closing label bracket', () => {
+    const createInlineCommandLink = requireFactory(
+      task10Api().createInlineCommandLink,
+      'createInlineCommandLink',
+    )
+
+    expect(createInlineCommandLink('Trailing\\', '/mai help')).toBe(
+      '[Trailing\\\\](mqqapi://aio/inlinecmd?command=%2Fmai%20help&enter=true&reply=false)',
+    )
+  })
+
   it('creates only valid previous and next callback buttons from opaque page data', () => {
     const createPagedCallbackButtons = requireFactory(
       task10Api().createPagedCallbackButtons,
@@ -344,6 +355,26 @@ describe('platform reply selection', () => {
     expect((elements as h[]).some(element => element.type.startsWith('qq:'))).toBe(false)
   })
 
+  it('copies only a sliced Uint8Array fallback image view', async () => {
+    const sendReply = requireFactory(task10Api().sendReply, 'sendReply')
+    const send = vi.fn(async () => undefined)
+    const backing = Uint8Array.from([0xaa, ...Buffer.from('image'), 0xbb])
+    const image = backing.subarray(1, backing.length - 1)
+
+    await sendReply(
+      { platform: 'discord', send },
+      { type: 'image', data: image, mimeType: 'image/png' },
+    )
+
+    const [elements] = send.mock.calls[0]
+    expect(elements).toEqual([
+      expect.objectContaining({
+        type: 'img',
+        attrs: { src: 'data:image/png;base64,aW1hZ2U=' },
+      }),
+    ])
+  })
+
   it('rejects QQ-native fallback input before sending', async () => {
     const sendReply = requireFactory(task10Api().sendReply, 'sendReply')
     const send = vi.fn(async () => undefined)
@@ -383,6 +414,18 @@ describe('platform reply selection', () => {
     expect(send).not.toHaveBeenCalled()
   })
 
+  it('rejects standard h.text elements on the QQ rich path', async () => {
+    const sendReply = requireFactory(task10Api().sendReply, 'sendReply')
+    const send = vi.fn(async () => undefined)
+
+    await expect(sendReply(
+      { platform: 'qq', send },
+      { type: 'text', text: 'fallback' },
+      h.text('# implicit rich text'),
+    )).rejects.toThrow('QQ rich replies must use a supported QQ Markdown element')
+    expect(send).not.toHaveBeenCalled()
+  })
+
   it('rejects rich elements containing streaming fields', async () => {
     const sendReply = requireFactory(task10Api().sendReply, 'sendReply')
     const send = vi.fn(async () => undefined)
@@ -391,6 +434,20 @@ describe('platform reply selection', () => {
       { platform: 'qq', send },
       { type: 'text', text: 'fallback' },
       h('qq:rawmarkdown-without-keyboard', { content: '# rich', stream: true }),
+    )).rejects.toThrow('QQ rich replies must not contain streaming fields')
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('rejects inherited streaming fields on supported QQ Markdown elements', async () => {
+    const sendReply = requireFactory(task10Api().sendReply, 'sendReply')
+    const send = vi.fn(async () => undefined)
+    const rich = h('qq:rawmarkdown-without-keyboard', { content: '# rich' })
+    Object.setPrototypeOf(rich.attrs, { stream: true })
+
+    await expect(sendReply(
+      { platform: 'qq', send },
+      { type: 'text', text: 'fallback' },
+      rich,
     )).rejects.toThrow('QQ rich replies must not contain streaming fields')
     expect(send).not.toHaveBeenCalled()
   })
@@ -459,6 +516,25 @@ describe('opaque command callback routing', () => {
     expect(handler).toHaveBeenCalledTimes(2)
     expect(handler).toHaveBeenNthCalledWith(1, payload, authorizedContext)
     expect(handler).toHaveBeenNthCalledWith(2, payload, authorizedContext)
+  })
+
+  it('rejects pagination fields inherited from a payload prototype', () => {
+    const router = createRouter()
+    const handler = vi.fn(async (payload: TestPaginationPayload) => payload)
+    const payload = Object.create({
+      mode: 'search',
+      query: 'inherited query',
+      page: 2,
+    }) as TestPaginationPayload
+
+    expect(() => router.registerPagination({
+      payload,
+      expectedUserId: 'user-1',
+      expectedChannelId: 'channel-1',
+      handler,
+    })).toThrow('Pagination payload must contain plain own properties')
+    expect(router.size).toBe(0)
+    expect(handler).not.toHaveBeenCalled()
   })
 
   it('rejects user, channel, authority, and permission mismatches without invoking the handler', async () => {

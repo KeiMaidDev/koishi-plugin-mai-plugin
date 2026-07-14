@@ -5,6 +5,12 @@ import {
   type FallbackMessage,
 } from './fallback-message'
 
+const supportedQqMarkdownElementTypes = new Set([
+  'qq:rawmarkdown-without-keyboard',
+  'qq:rawmarkdown',
+  'qq:markdown',
+])
+
 export interface QqButtonPermission {
   type: number
 }
@@ -139,6 +145,7 @@ export function createQqTemplateMarkdown(options: QqTemplateMarkdownOptions) {
 
 function escapeInlineCommandLabel(label: string) {
   return label
+    .replaceAll('\\', '\\\\')
     .replaceAll('[', '\u200B[\u200B')
     .replaceAll(']', '\u200B]\u200B')
 }
@@ -176,12 +183,15 @@ export function createPagedCallbackButtons(
 function createFallbackElement(element: FallbackElement) {
   if (element.type === 'text') return h.text(element.text)
   if (typeof element.data === 'string') return h.image(element.data)
-  return h.image(element.data, element.mimeType ?? 'application/octet-stream')
+  return h.image(
+    Buffer.from(element.data),
+    element.mimeType ?? 'application/octet-stream',
+  )
 }
 
 function containsStreamField(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false
-  if (Object.prototype.hasOwnProperty.call(value, 'stream')) return true
+  if (Reflect.has(value, 'stream')) return true
   if (Array.isArray(value)) return value.some(containsStreamField)
   return Object.values(value).some(containsStreamField)
 }
@@ -194,6 +204,9 @@ function elementContainsStreamField(element: h): boolean {
 function assertNonStreamingRichElement(rich: unknown): asserts rich is h {
   if (!h.isElement(rich)) {
     throw new TypeError('QQ rich replies must use an explicit Koishi element.')
+  }
+  if (!supportedQqMarkdownElementTypes.has(rich.type)) {
+    throw new TypeError('QQ rich replies must use a supported QQ Markdown element.')
   }
   if (elementContainsStreamField(rich)) {
     throw new TypeError('QQ rich replies must not contain streaming fields.')

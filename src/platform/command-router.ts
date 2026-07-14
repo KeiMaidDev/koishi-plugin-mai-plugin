@@ -106,18 +106,37 @@ function clonePayload<Payload>(payload: Payload): Payload {
   return structuredClone(payload)
 }
 
-function validatePaginationPayload(payload: PaginationPayload) {
-  if (!payload || typeof payload !== 'object') {
-    throw new TypeError('Pagination payload must be an object.')
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
+function hasOwn(value: object, key: PropertyKey) {
+  return Object.prototype.hasOwnProperty.call(value, key)
+}
+
+function validatePaginationPayload(payload: unknown): asserts payload is PaginationPayload {
+  if (!isPlainObject(payload)) {
+    throw new TypeError('Pagination payload must be a plain object.')
   }
-  positiveInteger(payload.page, 'Pagination page')
+  if (!hasOwn(payload, 'mode') || !hasOwn(payload, 'page')) {
+    throw new TypeError('Pagination payload must contain plain own properties.')
+  }
+  positiveInteger(payload.page as number, 'Pagination page')
   if (payload.mode === 'search') {
+    if (!hasOwn(payload, 'query')) {
+      throw new TypeError('Pagination payload must contain plain own properties.')
+    }
     if (typeof payload.query !== 'string') {
       throw new TypeError('Search pagination query must be a string.')
     }
     return
   }
   if (payload.mode === 'level' || payload.mode === 'score-list') {
+    if (!hasOwn(payload, 'filter')) {
+      throw new TypeError('Pagination payload must contain plain own properties.')
+    }
     if (typeof payload.filter !== 'string') {
       throw new TypeError('Pagination filter must be a string.')
     }
@@ -158,8 +177,9 @@ export class CommandCallbackRouter {
   registerPagination<Payload extends PaginationPayload, Result = unknown>(
     registration: PaginationCallbackRegistration<Payload, Result>,
   ) {
-    validatePaginationPayload(registration.payload)
-    return this.store({ ...registration, kind: 'pagination' }, true)
+    const payload = clonePayload(registration.payload)
+    validatePaginationPayload(payload)
+    return this.store({ ...registration, payload, kind: 'pagination' }, true)
   }
 
   async dispatch(

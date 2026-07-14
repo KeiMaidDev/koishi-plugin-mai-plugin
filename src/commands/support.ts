@@ -11,6 +11,7 @@ import type { AliasService } from '../services/alias-service'
 import type { QueryService } from '../services/query-service'
 import type { SettingService } from '../services/setting-service'
 import type { Awaitable } from '../types'
+import type { Semaphore } from '../utils/semaphore'
 
 export const SEARCH_PAGE_SIZE = 10
 export const SEARCH_TOO_MANY = 40
@@ -51,6 +52,7 @@ export interface CoreCommandDependencies {
   previewAudio?: (music: MusicInfo) => Awaitable<Buffer | Uint8Array | null>
   replayCommand?: (session: Session, command: string) => Awaitable<void>
   compatibilityPlatforms?: readonly string[]
+  regexWorkerSemaphore?: Semaphore
 }
 
 export type CoreCommandContext = Pick<Context, 'command'>

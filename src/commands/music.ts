@@ -1,4 +1,4 @@
-import type { Context } from 'koishi'
+import type { Command, Context } from 'koishi'
 import { Worker } from 'node:worker_threads'
 import { MusicDifficulty } from '../domain/enums'
 import type { ChartInfo, MusicInfo } from '../domain/music'
@@ -10,6 +10,7 @@ import {
 } from '../platform/qq-message'
 import { filterCharts, filterMusics } from '../query/combo-executor'
 import { parseComboQuery } from '../query/combo-parser'
+import { Semaphore } from '../utils/semaphore'
 import {
   MAX_USER_REGEX_LENGTH,
   commandAction,
@@ -26,6 +27,9 @@ const LEVEL_USAGE = '用法：定数查歌 <定数或范围> [页数]'
 const FIT_LEVEL_USAGE = '用法：拟合定数查歌 <定数或范围> [页数]'
 const USER_REGEX_TIMEOUT_MS = 100
 const USER_REGEX_STARTUP_TIMEOUT_MS = 1_000
+const userRegexWorkerSemaphore = new Semaphore(2, 4)
+
+export const REGEX_WORKER_BUSY_MESSAGE = '正则搜索繁忙，请稍后重试。'
 
 const difficultyTokens = [
   '绿谱', '绿', '黄谱', '黄', '红谱', '红', '紫谱', '紫', '白谱', '白',
@@ -79,6 +83,40 @@ function pageText(results: readonly MusicSearchResult[], page: number) {
   }
 }
 
+function createSearchPage(
+  dependencies: CoreCommandDependencies,
+  results: readonly MusicSearchResult[],
+  query: string,
+  page: number,
+  scope: { userId: string, channelId: string },
+) {
+  const view = pageText(results, page)
+  const callbackData = (targetPage: number) => dependencies.callbackRouter.registerPagination({
+    payload: { mode: 'search', query, page: targetPage },
+    expectedUserId: scope.userId,
+    expectedChannelId: scope.channelId,
+    handler: payload => createSearchPage(
+      dependencies,
+      results,
+      payload.query,
+      payload.page,
+      scope,
+    ).rich,
+  })
+  const row = createPagedCallbackButtons({
+    page: view.currentPage,
+    totalPages: view.totalPages,
+    callbackData,
+  })
+  return {
+    ...view,
+    rich: createQqNativeMarkdown(
+      view.text,
+      row.buttons.length ? createQqKeyboard([row]) : undefined,
+    ),
+  }
+}
+
 async function showResults(
   session: ActiveCommandSession,
   dependencies: CoreCommandDependencies,
@@ -104,23 +142,14 @@ async function showResults(
     return
   }
 
-  const view = pageText(results, page)
-  const callbackData = (targetPage: number) => dependencies.callbackRouter.registerPagination({
-    payload: { mode: 'search', query, page: targetPage },
-    expectedUserId: session.userId,
-    expectedChannelId: session.channelId,
-    handler: payload => pageText(results, payload.page).text,
-  })
-  const row = createPagedCallbackButtons({
-    page: view.currentPage,
-    totalPages: view.totalPages,
-    callbackData,
-  })
-  const rich = createQqNativeMarkdown(
-    view.text,
-    row.buttons.length ? createQqKeyboard([row]) : undefined,
+  const view = createSearchPage(
+    dependencies,
+    results,
+    query,
+    page,
+    { userId: session.userId, channelId: session.channelId },
   )
-  await replyText(session, dependencies, view.text, rich)
+  await replyText(session, dependencies, view.text, view.rich)
 }
 
 function parseLevelRange(raw: string) {
@@ -160,7 +189,7 @@ function validateUserRegex(source: string): UserRegexValidation {
   }
 }
 
-type WorkerRegexResult = { matches: number[] } | { error: 'malformed' | 'timeout' }
+type WorkerRegexResult = { matches: number[] } | { error: 'busy' | 'malformed' | 'timeout' }
 
 const regexWorkerSource = `
 const { parentPort, workerData } = require('node:worker_threads')
@@ -179,37 +208,44 @@ try {
 function executeUserRegex(
   source: string,
   values: readonly string[],
+  semaphore: Semaphore,
 ): Promise<WorkerRegexResult> {
-  return new Promise((resolve) => {
-    const worker = new Worker(regexWorkerSource, {
-      eval: true,
-      workerData: { source, values },
-    })
-    let settled = false
-    let timeout: ReturnType<typeof setTimeout>
-    const finish = (result: WorkerRegexResult) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      resolve(result)
+  return semaphore.acquire().then(async (release) => {
+    try {
+      return await new Promise<WorkerRegexResult>((resolve) => {
+        const worker = new Worker(regexWorkerSource, {
+          eval: true,
+          workerData: { source, values },
+        })
+        let settled = false
+        let timeout: ReturnType<typeof setTimeout>
+        const finish = (result: WorkerRegexResult) => {
+          if (settled) return
+          settled = true
+          clearTimeout(timeout)
+          resolve(result)
+        }
+        const terminateAsTimeout = () => {
+          if (settled) return
+          settled = true
+          void worker.terminate().finally(() => resolve({ error: 'timeout' }))
+        }
+        timeout = setTimeout(terminateAsTimeout, USER_REGEX_STARTUP_TIMEOUT_MS)
+        worker.once('online', () => {
+          if (settled) return
+          clearTimeout(timeout)
+          timeout = setTimeout(terminateAsTimeout, USER_REGEX_TIMEOUT_MS)
+        })
+        worker.once('message', (result: WorkerRegexResult) => finish(result))
+        worker.once('error', () => finish({ error: 'malformed' }))
+        worker.once('exit', (code) => {
+          if (code !== 0) finish({ error: 'malformed' })
+        })
+      })
+    } finally {
+      release()
     }
-    const terminateAsTimeout = () => {
-      if (settled) return
-      settled = true
-      void worker.terminate().finally(() => resolve({ error: 'timeout' }))
-    }
-    timeout = setTimeout(terminateAsTimeout, USER_REGEX_STARTUP_TIMEOUT_MS)
-    worker.once('online', () => {
-      if (settled) return
-      clearTimeout(timeout)
-      timeout = setTimeout(terminateAsTimeout, USER_REGEX_TIMEOUT_MS)
-    })
-    worker.once('message', (result: WorkerRegexResult) => finish(result))
-    worker.once('error', () => finish({ error: 'malformed' }))
-    worker.once('exit', (code) => {
-      if (code !== 0) finish({ error: 'malformed' })
-    })
-  })
+  }, () => ({ error: 'busy' }))
 }
 
 function seededValue(input: string) {
@@ -246,9 +282,9 @@ function registerTextShortcut(
   description: string,
   pattern: RegExp,
   action: (session: ActiveCommandSession, raw: string) => Promise<void>,
-  authority?: number,
+  config?: Command.Config,
 ) {
-  return ctx.command(definition, description, authority === undefined ? {} : { authority })
+  return ctx.command(definition, description, config)
     .shortcut(pattern, { args: ['$1'] })
     .action(commandAction(async ({ session }, raw = '') => {
       await action(session, raw)
@@ -407,14 +443,17 @@ export function registerMusicCommands(
       const execution = await executeUserRegex(
         validated.source,
         musics.map(music => music.name.slice(0, 256)),
+        dependencies.regexWorkerSemaphore ?? userRegexWorkerSemaphore,
       )
       if ('error' in execution) {
         await replyText(
           session,
           dependencies,
-          execution.error === 'timeout'
-            ? '正则表达式执行超时。'
-            : '请输入正确的正则表达式。',
+          execution.error === 'busy'
+            ? REGEX_WORKER_BUSY_MESSAGE
+            : execution.error === 'timeout'
+              ? '正则表达式执行超时。'
+              : '请输入正确的正则表达式。',
         )
         return
       }
@@ -499,6 +538,12 @@ export function registerMusicCommands(
     '删除歌曲别名（管理员）',
     /^\/mai\s+删除别名(?:\s+(.*))?$/,
     async (session, raw) => {
+      const [query, ...aliasParts] = raw.trim().split(/\s+/)
+      const alias = aliasParts.join(' ').trim()
+      if (!query || !alias) {
+        await replyText(session, dependencies, '用法：删除别名 <曲目> <别名>')
+        return
+      }
       const subject = {
         userId: session.userId,
         authority: (session.user as { authority?: number } | undefined)?.authority,
@@ -506,12 +551,6 @@ export function registerMusicCommands(
       }
       if (!isAdministrator(subject, { administrators: dependencies.administrators })) {
         await replyText(session, dependencies, '权限不足。')
-        return
-      }
-      const [query, ...aliasParts] = raw.trim().split(/\s+/)
-      const alias = aliasParts.join(' ').trim()
-      if (!query || !alias) {
-        await replyText(session, dependencies, '用法：删除别名 <曲目> <别名>')
         return
       }
       const music = await selectSingleMusic(dependencies, query)
@@ -522,7 +561,7 @@ export function registerMusicCommands(
       await dependencies.aliasService.remove(music.id, alias)
       await replyText(session, dependencies, '别名删除成功。')
     },
-    4,
+    { authority: 4, permissions: ['authority:0'] },
   ))
 
   commands.push(ctx.command('mai.daily', '生成稳定的今日舞萌推荐')

@@ -33,7 +33,7 @@ function querySession(session: ActiveCommandSession) {
         userId: String(element.attrs.id ?? ''),
         qq: element.attrs.id ? String(element.attrs.id) : undefined,
         isBot: String(element.attrs.id ?? '') === session.selfId,
-        isSelf: String(element.attrs.id ?? '') === session.selfId,
+        isSelf: String(element.attrs.id ?? '') === session.userId,
       })),
   }
 }

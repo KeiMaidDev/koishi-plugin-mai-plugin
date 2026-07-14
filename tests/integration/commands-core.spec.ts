@@ -298,6 +298,44 @@ describe('core maimai commands', () => {
     expect(heartbeats).toBeGreaterThan(0)
   })
 
+  it('bounds concurrent regex workers and rejects beyond the shared queue', async () => {
+    const dependencies = createDependencies()
+    const music = createMusicFixture()
+    Object.defineProperty(music, 'name', { value: 'a'.repeat(32) })
+    dependencies.data.musics = new Map([[music.id, music]])
+    const semaphore = new plugin.Semaphore(1, 1)
+    Object.assign(dependencies, { regexWorkerSemaphore: semaphore })
+    const app = await createApp(dependencies)
+    const clients = [
+      app.mock.client('10001', 'regex-a'),
+      app.mock.client('10001', 'regex-b'),
+      app.mock.client('10001', 'regex-c'),
+    ]
+    const command = '/mai 正则查歌 ^((.|..))+Z$'
+    const waitFor = async (predicate: () => boolean) => {
+      for (let attempt = 0; attempt < 100; attempt++) {
+        if (predicate()) return
+        await new Promise(resolve => setTimeout(resolve, 2))
+      }
+      throw new Error('Timed out waiting for regex worker admission state')
+    }
+
+    const first = clients[0].receive(command)
+    await waitFor(() => semaphore.active === 1)
+    const second = clients[1].receive(command)
+    await waitFor(() => semaphore.pending === 1)
+
+    await clients[2].shouldReply(command, '正则搜索繁忙，请稍后重试。')
+    expect(semaphore.active).toBe(1)
+    expect(semaphore.pending).toBe(1)
+
+    const [firstReply, secondReply] = await Promise.all([first, second])
+    expect(firstReply[0]).toMatch(/执行超时/)
+    expect(secondReply[0]).toMatch(/执行超时/)
+    expect(semaphore.active).toBe(0)
+    expect(semaphore.pending).toBe(0)
+  })
+
   it('uses opaque scoped Task 10 pagination callbacks', async () => {
     const dependencies = createDependencies()
     const base = createMusicFixture()
@@ -329,6 +367,83 @@ describe('core maimai commands', () => {
       userId: '10001',
       channelId: 'channel-a',
     })).resolves.toMatchObject({ ok: true, kind: 'pagination' })
+  })
+
+  it('navigates search pages forward and backward through real button interactions', async () => {
+    const dependencies = createDependencies()
+    dependencies.data.musics = new Map(Array.from({ length: 25 }, (_, index) => {
+      const music = createMusicFixture()
+      Object.defineProperties(music, {
+        id: { value: 7_000 + index },
+        name: { value: `Paged Search ${index + 1}` },
+      })
+      return [music.id, music]
+    }))
+    dependencies.aliasService.search.mockResolvedValue([...dependencies.data.musics.values()])
+    const registerPagination = vi.spyOn(dependencies.callbackRouter, 'registerPagination')
+    const app = await createApp(dependencies)
+    const client = app.mock.client('10001', 'channel-search')
+    client.event.platform = 'qq'
+    const sendMessage = vi.spyOn(client.bot, 'sendMessage')
+
+    await client.receive('/mai 查歌 paged')
+
+    const tokenForPage = (page: number, start: number) => {
+      for (let index = start; index < registerPagination.mock.calls.length; index++) {
+        if (registerPagination.mock.calls[index][0].payload.page === page) {
+          return registerPagination.mock.results[index].value as string
+        }
+      }
+      throw new Error(`Missing pagination token for page ${page}`)
+    }
+    const click = async (token: string) => {
+      const registrationStart = registerPagination.mock.calls.length
+      const sendStart = sendMessage.mock.calls.length
+      const session = client.bot.session({
+        type: 'interaction/button',
+        platform: 'qq',
+        user: { id: '10001' },
+        channel: { id: 'channel-search', type: Universal.Channel.Type.TEXT },
+        button: { id: token },
+      })
+      session.user = { authority: 1, permissions: [] } as never
+      session.permissions = []
+      session['client'] = client
+      client.bot.dispatch(session)
+      await new Promise(resolve => setImmediate(resolve))
+      await new Promise(resolve => setImmediate(resolve))
+      return {
+        registrationStart,
+        output: JSON.stringify(sendMessage.mock.calls.slice(sendStart)),
+      }
+    }
+
+    const firstNext = tokenForPage(2, 0)
+    const page2 = await click(firstNext)
+    const page2Previous = tokenForPage(1, page2.registrationStart)
+    const page2Next = tokenForPage(3, page2.registrationStart)
+    expect(page2.output).toContain('2 / 3')
+    expect(page2.output).toContain(page2Previous)
+    expect(page2.output).toContain(page2Next)
+    expect(page2Next).not.toBe(firstNext)
+
+    const page3 = await click(page2Next)
+    const page3Previous = tokenForPage(2, page3.registrationStart)
+    expect(page3.output).toContain('3 / 3')
+    expect(page3.output).toContain(page3Previous)
+
+    const page2Again = await click(page3Previous)
+    const page2AgainPrevious = tokenForPage(1, page2Again.registrationStart)
+    const page2AgainNext = tokenForPage(3, page2Again.registrationStart)
+    expect(page2Again.output).toContain('2 / 3')
+    expect(page2Again.output).toContain(page2AgainPrevious)
+    expect(page2Again.output).toContain(page2AgainNext)
+    expect(page2AgainPrevious).not.toBe(page2Previous)
+
+    const page1Again = await click(page2AgainPrevious)
+    const page1AgainNext = tokenForPage(2, page1Again.registrationStart)
+    expect(page1Again.output).toContain('1 / 3')
+    expect(page1Again.output).toContain(page1AgainNext)
   })
 
   it('rejects search threshold plus one before capturing pagination callbacks', async () => {
@@ -425,6 +540,35 @@ describe('core maimai commands', () => {
     expect(dependencies.aliasService.remove).not.toHaveBeenCalled()
     await admin.shouldReply('/mai 删除别名 1001 测试别名', /删除成功/)
     expect(dependencies.aliasService.remove).toHaveBeenCalledWith(1001, '测试别名')
+  })
+
+  it('allows configured and group-role administrators through alias delete policy', async () => {
+    const dependencies = createDependencies()
+    const app = await createApp(dependencies)
+    await app.mock.initUser('role-admin', 1)
+    const ordinary = app.mock.client('10001')
+    const configured = app.mock.client('configured-admin')
+    const groupAdmin = app.mock.client('role-admin', 'group-admin-channel')
+    groupAdmin.event.member = { roles: [{ id: 'admin' }] } as never
+
+    await ordinary.shouldReply('/mai 删除别名 1001 普通用户别名', /权限不足/)
+    await configured.shouldReply('/mai 删除别名 1001 配置管理员别名', /删除成功/)
+    await groupAdmin.shouldReply('/mai 删除别名 1001 群管理员别名', /删除成功/)
+
+    expect(dependencies.aliasService.remove.mock.calls).toEqual([
+      [1001, '配置管理员别名'],
+      [1001, '群管理员别名'],
+    ])
+  })
+
+  it('advertises alias delete authority without preempting its custom policy', async () => {
+    const app = await createApp()
+    const aliasRemove = app.$commander.get('mai.alias-remove')
+    const client = app.mock.client('10001')
+
+    expect(aliasRemove?.config.authority).toBe(4)
+    expect(aliasRemove?.config.permissions).toContain('authority:0')
+    await client.shouldReply('/mai 删除别名', /用法：删除别名/)
   })
 
   it('keys daily recommendations by user and local calendar date', async () => {
@@ -557,20 +701,27 @@ describe('core maimai commands', () => {
     expect(dependencies.renderer.renderRating).not.toHaveBeenCalled()
   })
 
-  it('marks mentions of the current bot as self mentions', async () => {
+  it('marks sender mentions as self while keeping bot mentions separate', async () => {
     const dependencies = createDependencies()
     const app = await createApp(dependencies)
     const client = app.mock.client('10001')
 
-    await client.receive('/mai b50 <at id="514"/>')
+    await client.receive('/mai b50 <at id="10001"/> <at id="514"/>')
 
     expect(dependencies.queryService.getQueryParams).toHaveBeenCalledWith(
       expect.objectContaining({
-        mentions: [expect.objectContaining({
-          userId: '514',
-          isBot: true,
-          isSelf: true,
-        })],
+        mentions: [
+          expect.objectContaining({
+            userId: '10001',
+            isBot: false,
+            isSelf: true,
+          }),
+          expect.objectContaining({
+            userId: '514',
+            isBot: true,
+            isSelf: false,
+          }),
+        ],
       }),
       expect.any(String),
     )
@@ -1072,7 +1223,8 @@ describe('core maimai commands', () => {
     expect(help.config.permissions).toContain('authority:1')
     expect(bind?._arguments.map(argument => argument.name)).toContain('qq')
     expect(aliasRemove).toBeDefined()
-    expect(aliasRemove?.config.permissions).toContain('authority:4')
+    expect(aliasRemove?.config.authority).toBe(4)
+    expect(aliasRemove?.config.permissions).toContain('authority:0')
   })
 
   it('runs exact prefixless commands at low priority for maimai users', async () => {

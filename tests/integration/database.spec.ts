@@ -1,5 +1,8 @@
 import MemoryDriver from '@koishijs/plugin-database-memory'
 import { Context } from '@koishijs/core'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as publicApi from '../../src'
 import { initializePlugin, type Config } from '../../src'
@@ -434,6 +437,7 @@ describe('default lifecycle database integration', () => {
 
   it('registers database models without replacing lifecycle diagnostics or cleanup', async () => {
     const ctx = new Context()
+    const cacheDir = await mkdtemp(join(tmpdir(), 'mai-lifecycle-'))
     ctx.plugin(MemoryDriver)
     Object.defineProperty(ctx, 'server', {
       configurable: true,
@@ -442,10 +446,14 @@ describe('default lifecycle database integration', () => {
     await ctx.start()
 
     try {
-      await initializePlugin(ctx, config)
+      await initializePlugin(ctx, {
+        ...config,
+        resourceSync: { ...config.resourceSync, enabled: false, cacheDir },
+      })
       expect(ctx.model.tables.mai_oauth_token.primary).toEqual(['userId', 'provider'])
     } finally {
       await ctx.stop()
+      await rm(cacheDir, { recursive: true, force: true })
     }
   })
 })

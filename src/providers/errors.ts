@@ -75,6 +75,24 @@ export function isProviderError(error: unknown): error is ProviderError {
   return error instanceof ProviderError
 }
 
+export function findCancellationError(error: unknown): Error | null {
+  const seen = new Set<unknown>()
+  let current = error
+  while (typeof current === 'object' && current !== null && !seen.has(current)) {
+    seen.add(current)
+    if (current instanceof Error
+      && ['AbortError', 'CanceledError', 'CancellationError'].includes(current.name)) {
+      return current
+    }
+    current = (current as { cause?: unknown }).cause
+  }
+  return null
+}
+
+export function isCancellationError(error: unknown): error is Error {
+  return findCancellationError(error) !== null
+}
+
 function responseMessage(value: unknown) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return ''
   const message = (value as Record<string, unknown>).message

@@ -8,6 +8,7 @@ import {
   ProviderAuthorizationError,
   ProviderBindingRequiredError,
   ProviderError,
+  findCancellationError,
   ProviderMalformedPayloadError,
   ProviderNoDataError,
   ProviderNotFoundError,
@@ -134,6 +135,8 @@ export class ProviderChain {
       try {
         return { response: await operation(provider), provider }
       } catch (error) {
+        const cancellation = findCancellationError(error)
+        if (cancellation) throw cancellation
         const failure = this.normalizeFailure(provider, user, error)
         if (failure instanceof ProviderOAuthRequiredError) throw failure
         failures.push(failure)

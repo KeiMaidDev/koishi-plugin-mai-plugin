@@ -108,6 +108,12 @@ function positiveInteger(value: number, name: string) {
   return value
 }
 
+function isMissingFile(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error
+    && 'code' in error
+    && (error.code === 'ENOENT' || error.code === 'ENOTDIR')
+}
+
 export class TakumiRenderService {
   private readonly renderer = new Renderer()
   private readonly semaphore: Semaphore
@@ -142,8 +148,13 @@ export class TakumiRenderService {
     return this.initializationPromise
   }
 
-  loadAsset(path: string) {
-    return this.assetCache.load(path)
+  async loadAsset(path: string, fallbackPath?: string) {
+    try {
+      return await this.assetCache.load(path)
+    } catch (error) {
+      if (!fallbackPath || !isMissingFile(error)) throw error
+      return this.assetCache.load(fallbackPath)
+    }
   }
 
   invalidateAssets(paths: Iterable<string>) {

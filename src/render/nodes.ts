@@ -33,7 +33,7 @@ function freezeNodeTree<T>(value: T): T {
 }
 
 function finalizeNode<T extends Node>(node: T): T {
-  return process.env.NODE_ENV === 'test' ? freezeNodeTree(node) : node
+  return freezeNodeTree(node)
 }
 
 export function createContainerNode(input: ContainerNodeInput): ContainerNode {

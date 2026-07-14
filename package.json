@@ -16,7 +16,8 @@
     "lib",
     "dist",
     "assets/fallback",
-    "assets/fonts"
+    "assets/fonts",
+    "assets/generated"
   ],
   "license": "MIT",
   "engines": {
@@ -26,7 +27,10 @@
     "build": "npm run build:types && npm run build:js",
     "build:types": "tsc -p tsconfig.json",
     "build:js": "vite build",
+    "generate:render-baselines": "node scripts/generate-render-baselines.mjs",
+    "generate:render-assets": "node scripts/generate-render-assets.mjs",
     "prepack": "tsc -p tsconfig.json && vite build --logLevel error",
+    "seed:linux-render-baselines": "node scripts/generate-render-baselines.mjs --seed-linux-from-windows",
     "test": "vitest run --testTimeout=15000",
     "test:integration": "vitest run tests/integration/plugin.spec.ts"
   },

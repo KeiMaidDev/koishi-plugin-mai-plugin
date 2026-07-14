@@ -4,7 +4,6 @@ import { MusicDifficulty } from '../domain/enums'
 import type { ChartInfo, MusicInfo, RecordEntry } from '../domain/music'
 import type { RecordsResponse } from '../domain/player'
 import { Rating } from '../domain/rating'
-import { mapQueryError } from '../platform/fallback-message'
 import {
   createPagedCallbackButtons,
   createQqKeyboard,
@@ -16,6 +15,7 @@ import type { ComboFilter } from '../query/filter-types'
 import {
   commandAction,
   replyImage,
+  replyQueryError,
   replyText,
   SCORE_LIST_PAGE_SIZE,
   type ActiveCommandSession,
@@ -44,8 +44,7 @@ async function commandFailure(
   error: unknown,
   isSelf = true,
 ) {
-  const mapped = mapQueryError(error, { isSelf })
-  await replyText(session, dependencies, mapped.text)
+  await replyQueryError(session, dependencies, error, isSelf)
 }
 
 function resultRecords(response: RecordsResponse, filters?: readonly ComboFilter[] | null) {

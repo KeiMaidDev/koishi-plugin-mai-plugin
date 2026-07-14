@@ -28,7 +28,14 @@ import { GuessService, type GuessReply, type GuessTarget } from './services/gues
 import { QqBindingRequiredError, QueryService } from './services/query-service'
 import { QueueService } from './services/queue-service'
 import { SettingService } from './services/setting-service'
+import {
+  createKoishiWahlapRequester,
+  UpdateFlowError,
+  UpdateService,
+  WahlapRecordFetcher,
+} from './services/update-service'
 import type { Awaitable, LifecycleContext, LifecycleSteps, PluginContext } from './types'
+import { registerMaiServerRoutes } from './server/routes'
 
 export const name = PLUGIN_NAME
 
@@ -58,6 +65,10 @@ export * from './services/guess-service'
 export * from './services/query-service'
 export * from './services/queue-service'
 export * from './services/setting-service'
+export * from './services/update-service'
+export * from './server/callback-store'
+export * from './server/proxy-config'
+export * from './server/routes'
 export * from './commands/calc'
 export * from './commands/core'
 export * from './commands/guess'
@@ -67,6 +78,7 @@ export * from './commands/music'
 export * from './commands/queue'
 export * from './commands/record'
 export * from './commands/settings'
+export * from './commands/update'
 export * from './commands/support'
 export * from './platform/admin'
 export * from './platform/command-router'
@@ -111,6 +123,9 @@ interface DefaultRuntimeState {
   dataSync?: MaimaiDataSyncService
   disconnectInvalidation?: () => void
   commandRegistration?: CoreCommandRegistration
+  commandDependencies?: CoreCommandDependencies | null
+  servicesInitialized?: boolean
+  routeRegistration?: { dispose(): void }
 }
 
 const defaultRuntimeStates = new WeakMap<object, DefaultRuntimeState>()
@@ -207,6 +222,29 @@ export async function createDefaultCommandDependencies(
     throw error
   }
   const previewDirectory = join(runtime.config.resourceSync.cacheDir, 'preview')
+  const wahlapRequest = createKoishiWahlapRequester(ctx.http)
+  const wahlapFetcher = new WahlapRecordFetcher({ request: wahlapRequest })
+  const updateService = new UpdateService({
+    publicBaseUrl: runtime.publicBaseUrl,
+    oauth: runtime.config.oauth,
+    lxns: providers.lxns,
+    bind: repositories.bind,
+    async fetchAuthorizationRedirect() {
+      const response = await wahlapRequest(
+        'https://tgk-wcaime.wahlap.com/wc_auth/oauth/authorize/maimai-dx',
+        { redirect: 'manual' },
+      )
+      const location = Array.isArray(response.headers.location)
+        ? response.headers.location[0]
+        : response.headers.location
+      if (!location) throw new UpdateFlowError('授权服务器未返回重定向地址。')
+      return location
+    },
+    fetchDivingFishRecords: callbackUrl => wahlapFetcher.fetch(callbackUrl),
+    importDivingFishRecords: (userId, records, importToken) => (
+      providers.divingFish.importRecords(userId, records, importToken)
+    ),
+  })
 
   return {
     data,
@@ -215,6 +253,7 @@ export async function createDefaultCommandDependencies(
     settingService,
     bindRepository: repositories.bind,
     queueService,
+    updateService,
     guessService,
     settingRepository: repositories.setting,
     renderer: new TakumiMaiRenderer(services.renderer, data),
@@ -259,6 +298,42 @@ export function createDefaultLifecycle(
     return state.dataSync
   }
 
+  const ensureCommandDependencies = async (runtime: LifecycleContext) => {
+    if (state.servicesInitialized) return state.commandDependencies ?? null
+    try {
+      state.commandDependencies = await dependencies.createCommandDependencies(
+        ctx,
+        runtime,
+        {
+          dataSync: ensureDataSync(runtime),
+          renderer: state.renderer,
+        },
+      )
+      state.servicesInitialized = true
+      return state.commandDependencies
+    } catch (error) {
+      state.commandDependencies = undefined
+      state.servicesInitialized = false
+      throw error
+    }
+  }
+
+  const routeEndpoint = (publicUrl: string) => {
+    try {
+      const url = new URL(publicUrl)
+      if (!['http:', 'https:'].includes(url.protocol)) throw new Error('unsupported protocol')
+      return {
+        proxy: {
+          server: url.hostname,
+          port: url.port ? Number(url.port) : url.protocol === 'https:' ? 443 : 80,
+        },
+        allowedHost: url.hostname,
+      }
+    } catch {
+      return { proxy: { server: '', port: 0 }, allowedHost: 'tgk-wcaime.wahlap.com' }
+    }
+  }
+
   return {
     async verifyNativePackages() {
       await Promise.all([
@@ -277,19 +352,28 @@ export function createDefaultLifecycle(
       await state.renderer.initialize()
       state.disconnectInvalidation ??= connectDataSyncAssetInvalidation(dataSync, state.renderer)
     },
-    initializeServices: noOp,
-    initializeRoutes: noOp,
+    async initializeServices(runtime) {
+      const server = (ctx as Context & { server?: { all?: unknown } }).server
+      if (typeof (ctx as Context).command !== 'function' && typeof server?.all !== 'function') return
+      await ensureCommandDependencies(runtime)
+    },
+    async initializeRoutes(runtime) {
+      if (state.routeRegistration) return
+      const server = (ctx as Context & { server?: { all?: unknown } }).server
+      if (typeof server?.all !== 'function') return
+      const commandDependencies = await ensureCommandDependencies(runtime)
+      if (!commandDependencies?.updateService) return
+      const endpoint = routeEndpoint(runtime.publicBaseUrl)
+      state.routeRegistration = registerMaiServerRoutes(ctx, {
+        service: commandDependencies.updateService,
+        proxy: endpoint.proxy,
+        allowedWahlapHost: endpoint.allowedHost,
+      })
+    },
     async initializeCommands(runtime) {
       if (state.commandRegistration) return
       if (typeof (ctx as Context).command !== 'function') return
-      const commandDependencies = await dependencies.createCommandDependencies(
-        ctx,
-        runtime,
-        {
-          dataSync: ensureDataSync(runtime),
-          renderer: state.renderer,
-        },
-      )
+      const commandDependencies = await ensureCommandDependencies(runtime)
       if (!commandDependencies) return
       state.commandRegistration = registerCoreCommands(ctx, commandDependencies)
     },
@@ -298,13 +382,22 @@ export function createDefaultLifecycle(
       state.renderer?.clearWaitingQueue(new Error('[mai-plugin] renderer queue cleared'))
     },
     async releaseCallbackState() {
+      const updateService = state.commandDependencies?.updateService
       try {
         await state.commandRegistration?.dispose()
       } finally {
         state.commandRegistration = undefined
-        state.disconnectInvalidation?.()
-        state.disconnectInvalidation = undefined
-        defaultRuntimeStates.delete(ctx)
+        try {
+          state.routeRegistration?.dispose()
+        } finally {
+          state.routeRegistration = undefined
+          updateService?.dispose()
+          state.commandDependencies = undefined
+          state.servicesInitialized = false
+          state.disconnectInvalidation?.()
+          state.disconnectInvalidation = undefined
+          defaultRuntimeStates.delete(ctx)
+        }
       }
     },
   }

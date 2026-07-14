@@ -12,6 +12,10 @@ import type { QueryService } from '../services/query-service'
 import type { QueueService } from '../services/queue-service'
 import type { SettingService } from '../services/setting-service'
 import type { GuessService } from '../services/guess-service'
+import type { UpdateService } from '../services/update-service'
+import { PublicCallbackUnavailableError } from '../services/update-service'
+import { ProviderOAuthRequiredError } from '../providers/errors'
+import { mapQueryError } from '../platform/fallback-message'
 import type { Awaitable } from '../types'
 import type { Semaphore } from '../utils/semaphore'
 
@@ -59,6 +63,16 @@ export interface CoreCommandDependencies {
     | 'aliases'
     | 'bindGroup'
     | 'handleMessage'
+  >
+  updateService?: Pick<
+    UpdateService,
+    | 'beginDivingFishUpdate'
+    | 'beginLxnsOAuth'
+    | 'bindDivingFishToken'
+    | 'completeLxnsOAuth'
+    | 'createUpdateRedirect'
+    | 'completeDivingFishUpdate'
+    | 'dispose'
   >
   renderer: MaiRenderer
   callbackRouter: CommandCallbackRouter
@@ -126,6 +140,47 @@ export async function replyText(
     rich,
     { compatibilityMode: await compatibilityModeFor(session, dependencies) },
   )
+}
+
+export async function replyQueryError(
+  session: ActiveCommandSession,
+  dependencies: CoreCommandDependencies,
+  error: unknown,
+  isSelf = true,
+) {
+  if (isSelf && error instanceof ProviderOAuthRequiredError && dependencies.updateService) {
+    try {
+      const url = await dependencies.updateService.beginLxnsOAuth({
+        userId: session.userId,
+        platform: session.platform,
+        channelId: session.channelId,
+        direct: session.isDirect,
+        pendingCommand: session.content,
+        send: text => replyText(session, dependencies, text),
+        replay: async (command) => {
+          if (dependencies.replayCommand) {
+            await dependencies.replayCommand(session, command)
+          } else {
+            await session.execute(command)
+          }
+        },
+      })
+      await replyText(
+        session,
+        dependencies,
+        `使用该功能需要授权 BOT 访问您在落雪查分器的全部成绩：\n${url}`,
+      )
+      return
+    } catch (oauthError) {
+      if (oauthError instanceof PublicCallbackUnavailableError) {
+        await replyText(session, dependencies, oauthError.message)
+        return
+      }
+      await replyText(session, dependencies, '落雪授权请求失败，请稍后重试。')
+      return
+    }
+  }
+  await replyText(session, dependencies, mapQueryError(error, { isSelf }).text)
 }
 
 export async function replyImage(

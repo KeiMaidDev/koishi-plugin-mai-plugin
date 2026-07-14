@@ -1,11 +1,11 @@
 import type { Context } from 'koishi'
 import { MusicDifficulty } from '../domain/enums'
 import type { ChartInfo, RecordEntry } from '../domain/music'
-import { mapQueryError } from '../platform/fallback-message'
 import { filterCharts, filterMusics, filterRecords } from '../query/combo-executor'
 import { parseComboQuery } from '../query/combo-parser'
 import {
   commandAction,
+  replyQueryError,
   replyText,
   type ActiveCommandSession,
   type CoreCommandDependencies,
@@ -72,8 +72,7 @@ export function registerRecordCommands(
           `您的${filterText}进度如下：\n${lines.join('\n')}\n总计 ${totalRemaining} 个`,
         )
       } catch (error) {
-        const mapped = mapQueryError(error, { isSelf })
-        await replyText(session, dependencies, mapped.text)
+        await replyQueryError(session, dependencies, error, isSelf)
       }
     }))]
 }

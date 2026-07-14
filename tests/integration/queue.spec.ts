@@ -591,9 +591,15 @@ describe('arcade queue core lifecycle', () => {
           dataSync: { startup: vi.fn(async () => data) } as never,
           renderer: new plugin.TakumiRenderService({ concurrency: 1, queueLimit: 4 }),
         },
-      ) as unknown as { queueService?: unknown, guessService: plugin.GuessService }
+      ) as unknown as {
+        queueService?: unknown
+        updateService?: unknown
+        guessService: plugin.GuessService
+      }
 
       expect(dependencies.queueService).toBeInstanceOf(plugin.QueueService)
+      expect(dependencies.updateService).toBeInstanceOf(plugin.UpdateService)
+      ;(dependencies.updateService as plugin.UpdateService).dispose()
       await dependencies.guessService.dispose()
     } finally {
       await app.stop()

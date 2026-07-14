@@ -5,6 +5,7 @@ import type { MaiRepositories } from '../database/repositories'
 import type { MusicInfo, RecordEntry } from '../domain/music'
 import type { PlayerSettings, RatingResponse, RecordsResponse } from '../domain/player'
 import {
+  findCancellationError,
   isProviderError,
   ProviderMalformedPayloadError,
   ProviderTimeoutError,
@@ -83,8 +84,7 @@ function timeoutFromCause(provider: ProviderId, error: unknown) {
   while (typeof current === 'object' && current !== null && !seen.has(current)) {
     seen.add(current)
     if (current instanceof ProviderTimeoutError) return current
-    if ((current as { code?: unknown }).code === 'ETIMEDOUT'
-      || (current as { name?: unknown }).name === 'AbortError') {
+    if ((current as { code?: unknown }).code === 'ETIMEDOUT') {
       return new ProviderTimeoutError(provider)
     }
     current = (current as { cause?: unknown }).cause
@@ -137,8 +137,13 @@ export class ProviderHttpClient {
       return response
     } catch (error) {
       const timeout = timeoutFromCause(this.provider, error)
-      this.logger?.warn(`[mai-plugin] ${this.provider} ${request.label} request failed (${timeout ? 'timeout' : 'transport'}).`)
-      if (timeout) throw timeout
+      if (timeout) {
+        this.logger?.warn(`[mai-plugin] ${this.provider} ${request.label} request failed (timeout).`)
+        throw timeout
+      }
+      const cancellation = findCancellationError(error)
+      if (cancellation) throw cancellation
+      this.logger?.warn(`[mai-plugin] ${this.provider} ${request.label} request failed (transport).`)
       if (isProviderError(error)) throw error
       throw new ProviderTransportError(this.provider)
     } finally {

@@ -311,8 +311,10 @@ export class LxnsProvider implements MaimaiProvider {
   }
 
   async getPlayerRecords(user: UserQuery, _musics: MusicInfo[]) {
+    if (!user.isSelf || !user.userId) {
+      throw new ProviderOAuthRequiredError(this.id, 'OAuth score access requires a self query with a local user id.')
+    }
     const player = await this.getPlayerInfo(user)
-    if (!user.userId) throw new ProviderOAuthRequiredError(this.id, 'OAuth score access requires a local user id.')
     const accessToken = await this.getOAuthAccessToken(user.userId)
     const response = await this.http.json({
       label: 'all-scores',

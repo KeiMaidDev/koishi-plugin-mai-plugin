@@ -74,6 +74,14 @@ export class PendingCommandCache {
     return entry.command
   }
 
+  delete(scope: PendingCommandScope) {
+    return this.entries.delete(pendingCommandKey(scope))
+  }
+
+  clearScope(scope: PendingCommandScope) {
+    this.delete(scope)
+  }
+
   private pruneExpired(now = this.now()) {
     for (const [key, entry] of this.entries) {
       if (entry.expiresAt <= now) this.entries.delete(key)
@@ -121,12 +129,6 @@ export interface QueryServiceOptions {
   settings?: Pick<SettingService, 'getSettings'>
 }
 
-function positiveInteger(value: string | null | undefined) {
-  if (!value || !/^\d+$/.test(value.trim())) return null
-  const parsed = Number(value)
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null
-}
-
 export function normalizeProviderPreference(value: string | null | undefined): ProviderMode {
   return value === 'diving-fish' || value === 'lxns' ? value : 'auto'
 }
@@ -139,11 +141,11 @@ type PublicQueryTarget = {
   username: string
 }
 
-function publicQuery(userId: string, target: PublicQueryTarget): UserQuery {
+function publicQuery(target: PublicQueryTarget): UserQuery {
   if (target.type === 'qq') {
-    return { ...target, userId, isSelf: false, provider: 'auto' }
+    return { ...target, isSelf: false, provider: 'auto' }
   }
-  return { ...target, userId, isSelf: false, provider: 'auto' }
+  return { ...target, isSelf: false, provider: 'auto' }
 }
 
 export class QueryService {
@@ -167,15 +169,15 @@ export class QueryService {
       if (qq === null || qq === undefined || String(qq).trim() === '') {
         throw new QueryTargetBindingRequiredError(mention.userId)
       }
-      return publicQuery(session.userId, { type: 'qq', qq: String(qq) })
+      return this.resolve(session, publicQuery({ type: 'qq', qq: String(qq) }))
     }
 
     const target = queryArgs?.trim() ?? ''
     if (!target) return this.selfQuery(session)
 
     const qq = target.match(/^qq(\d+)$/i)
-    if (qq) return publicQuery(session.userId, { type: 'qq', qq: qq[1] })
-    return publicQuery(session.userId, { type: 'username', username: target })
+    if (qq) return this.resolve(session, publicQuery({ type: 'qq', qq: qq[1] }))
+    return this.resolve(session, publicQuery({ type: 'username', username: target }))
   }
 
   consumePendingCommand(scope: PendingCommandScope) {
@@ -208,28 +210,30 @@ export class QueryService {
 
     if (this.settings) {
       const settings = await this.settings.getSettings(session.userId)
-      return {
+      return this.resolve(session, {
         type: 'qq',
         qq,
         userId: session.userId,
         isSelf: true,
         settings: new PlayerSettings(settings.avatar, settings.plate),
         provider: settings.provider,
-      }
+      })
     }
 
     const stored = await this.repositories.setting.list(session.userId)
-    return {
+    return this.resolve(session, {
       type: 'qq',
       qq,
       userId: session.userId,
       isSelf: true,
-      settings: new PlayerSettings(
-        positiveInteger(stored.icon),
-        positiveInteger(stored.plate),
-      ),
+      settings: new PlayerSettings(null, null),
       provider: normalizeProviderPreference(stored.prober),
-    }
+    })
+  }
+
+  private resolve(session: QuerySession, query: UserQuery) {
+    this.pendingCommands.clearScope(session)
+    return query
   }
 
   private requireProviderChain() {

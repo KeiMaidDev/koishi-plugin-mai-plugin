@@ -7,10 +7,14 @@ import {
   ProviderPrivacyError,
   ProviderUnsupportedError,
 } from '../providers/errors'
-import { QqBindingRequiredError } from '../services/query-service'
+import {
+  QqBindingRequiredError,
+  QueryTargetBindingRequiredError,
+} from '../services/query-service'
 
 export type QueryErrorCode =
   | 'qq-unbound'
+  | 'target-qq-unbound'
   | 'provider-unbound'
   | 'player-not-found'
   | 'privacy-denied'
@@ -60,6 +64,7 @@ export class FilterTooManyError extends Error {
 
 const messages: Record<QueryErrorCode, string> = {
   'qq-unbound': '为了继续后续查询，请输入"/bind qq号"绑定您的QQ号：',
+  'target-qq-unbound': '被提及的用户尚未绑定QQ号，无法作为查询目标。',
   'provider-unbound': '您还未在查分器上绑定QQ号，请前往水鱼/落雪查分器设置您的QQ号。',
   'player-not-found': '您查询的用户不存在。',
   'privacy-denied': '您查询的用户设置了查分器隐私或未同意查分器协议，请检查设置。',
@@ -83,6 +88,7 @@ export function mapQueryError(
   const cancellation = findCancellationError(error)
   if (cancellation) throw cancellation
   if (error instanceof QqBindingRequiredError) return errorMessage('qq-unbound')
+  if (error instanceof QueryTargetBindingRequiredError) return errorMessage('target-qq-unbound')
   if (error instanceof ProviderBindingRequiredError) return errorMessage('provider-unbound')
   if (error instanceof ProviderNotFoundError) return errorMessage('player-not-found')
   if (error instanceof ProviderPrivacyError) {

@@ -160,7 +160,8 @@ export class SettingService {
       matchesCollection(value, String(requested))
     ))
     if (!plate) throw new InvalidSettingError('plate', requested)
-    if (plate.genre === '実績' && plate.requires.length > 0) {
+    if (plate.genre === '実績') {
+      if (!plate.requires.length) throw new PlateNotAcquiredError(plate)
       await this.assertPlateAcquired(userId, plate)
     }
     await this.repositories.setting.set(userId, 'plate', String(plate.id))

@@ -536,6 +536,30 @@ describe('LXNS endpoints and OAuth', () => {
     http.assertDrained()
   })
 
+  it('never uses a local OAuth token for public-target full score queries', async () => {
+    const http = routedContext([])
+    const repositories = createRepositories()
+    const provider = new LxnsProvider({
+      ctx: http.ctx,
+      config,
+      data: createStore(),
+      repositories,
+    })
+    const publicTarget: UserQuery = {
+      type: 'username',
+      username: 'fixture-user',
+      userId: 'requester-user',
+      isSelf: false,
+      provider: 'lxns',
+    }
+
+    await expect(provider.getPlayerRecords(publicTarget, []))
+      .rejects.toBeInstanceOf(ProviderOAuthRequiredError)
+    expect(repositories.oauth.get).not.toHaveBeenCalled()
+    expect(http.calls).toEqual([])
+    http.assertDrained()
+  })
+
   it.each([
     ['collection scalar', (() => {
       const payload = clone(lxnsPlayerFixture)
@@ -685,7 +709,6 @@ describe('provider error taxonomy and timeouts', () => {
 
   it.each([
     ['provider timeout', new ProviderTimeoutError('diving-fish')],
-    ['abort error', Object.assign(new Error('aborted'), { name: 'AbortError' })],
     ['timeout code', Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' })],
   ])('maps Cordis-style wrapped %s causes to provider timeout', async (_name, cause) => {
     const wrapped = new HTTP.Error('fetch https://example.invalid failed')
@@ -701,6 +724,27 @@ describe('provider error taxonomy and timeouts', () => {
     })
 
     await expect(provider.getPlayerRating(username())).rejects.toBeInstanceOf(ProviderTimeoutError)
+  })
+
+  it.each(['raw', 'wrapped'])('preserves a genuine %s AbortError through ProviderHttpClient', async kind => {
+    const abort = Object.assign(new Error('cancelled by caller'), { name: 'AbortError' })
+    const error = kind === 'wrapped'
+      ? Object.assign(new HTTP.Error('fetch https://example.invalid failed'), { cause: abort })
+      : abort
+    const warnings: string[] = []
+    const ctx = {
+      http: vi.fn(async () => { throw error }),
+    } as ProviderContext
+    const provider = new DivingFishProvider({
+      ctx,
+      config,
+      data: createStore(),
+      repositories: createRepositories(),
+      logger: { warn: message => warnings.push(message) },
+    })
+
+    await expect(provider.getPlayerRating(username())).rejects.toBe(abort)
+    expect(warnings).toEqual([])
   })
 })
 

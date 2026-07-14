@@ -136,14 +136,16 @@ function plateRecord(music: MusicInfo, chart: ChartInfo, achievement: number) {
 
 describe('QueryService query target resolution', () => {
   it('resolves a self query with normalized player and provider settings', async () => {
-    const { QueryService } = task9Api()
+    const { QueryService, SettingService } = task9Api()
     const bind = new MemoryBindRepository()
     const setting = new MemorySettingRepository()
+    const { data } = settingsData()
     bind.set('user-1', '123456789')
     await setting.set('user-1', 'icon', '106103')
     await setting.set('user-1', 'plate', '100501')
     await setting.set('user-1', 'prober', 'lxns')
-    const service = new QueryService({ bind, setting })
+    const settings = new SettingService(data, { setting })
+    const service = new QueryService({ bind, setting }, { settings })
 
     await expect(service.getQueryParams({
       userId: 'user-1',
@@ -179,15 +181,14 @@ describe('QueryService query target resolution', () => {
     }, 'someone-else')).resolves.toEqual({
       type: 'qq',
       qq: '99887766',
-      userId: 'user-1',
       isSelf: false,
       provider: 'auto',
     })
   })
 
   it.each([
-    ['qq123456', { type: 'qq', qq: '123456', userId: 'user-1', isSelf: false, provider: 'auto' }],
-    ['Alice', { type: 'username', username: 'Alice', userId: 'user-1', isSelf: false, provider: 'auto' }],
+    ['qq123456', { type: 'qq', qq: '123456', isSelf: false, provider: 'auto' }],
+    ['Alice', { type: 'username', username: 'Alice', isSelf: false, provider: 'auto' }],
   ])('resolves the explicit target %s', async (queryArgs, expected) => {
     const { QueryService } = task9Api()
     const service = new QueryService({
@@ -222,6 +223,101 @@ describe('QueryService query target resolution', () => {
     expect(service.consumePendingCommand({ ...session, sessionId: 'qq:guild-1:channel-2' })).toBeNull()
     expect(service.consumePendingCommand(session)).toBe('/mai b50')
     expect(service.consumePendingCommand(session)).toBeNull()
+  })
+
+  it('invalidates a stale pending command after a successful public target resolution', async () => {
+    const { PendingCommandCache, QueryService } = task9Api()
+    const cache = new PendingCommandCache({ maxEntries: 8, ttlMs: 60_000 })
+    const service = new QueryService({
+      bind: new MemoryBindRepository(),
+      setting: new MemorySettingRepository(),
+    }, { pendingCommands: cache })
+    const session = {
+      userId: 'user-1',
+      sessionId: 'qq:guild-1:channel-1',
+      command: '/mai b50',
+    }
+    await expect(service.getQueryParams(session)).rejects.toMatchObject({
+      name: 'QqBindingRequiredError',
+    })
+
+    await expect(service.getQueryParams(session, 'Alice')).resolves.toMatchObject({
+      type: 'username',
+      username: 'Alice',
+    })
+    expect(service.consumePendingCommand(session)).toBeNull()
+  })
+
+  it('preserves consume-before-replay when binding makes a self query resolvable', async () => {
+    const { PendingCommandCache, QueryService } = task9Api()
+    const bind = new MemoryBindRepository()
+    const setting = new MemorySettingRepository()
+    const cache = new PendingCommandCache({ maxEntries: 8, ttlMs: 60_000 })
+    const service = new QueryService({ bind, setting }, { pendingCommands: cache })
+    const session = {
+      userId: 'user-1',
+      sessionId: 'private:user-1',
+      command: '/mai b50',
+    }
+    await expect(service.getQueryParams(session)).rejects.toMatchObject({
+      name: 'QqBindingRequiredError',
+    })
+    bind.set('user-1', '123456')
+
+    const replay = service.consumePendingCommand(session)
+    await expect(service.getQueryParams(session)).resolves.toMatchObject({
+      type: 'qq',
+      qq: '123456',
+      isSelf: true,
+    })
+
+    expect(replay).toBe('/mai b50')
+    expect(service.consumePendingCommand(session)).toBeNull()
+  })
+
+  it('invalidates an unconsumed stale command after successful self resolution', async () => {
+    const { PendingCommandCache, QueryService } = task9Api()
+    const bind = new MemoryBindRepository()
+    const setting = new MemorySettingRepository()
+    const cache = new PendingCommandCache({ maxEntries: 8, ttlMs: 60_000 })
+    const service = new QueryService({ bind, setting }, { pendingCommands: cache })
+    const session = {
+      userId: 'user-1',
+      sessionId: 'private:user-1',
+      command: '/mai b50',
+    }
+    await expect(service.getQueryParams(session)).rejects.toMatchObject({
+      name: 'QqBindingRequiredError',
+    })
+    bind.set('user-1', '123456')
+
+    await expect(service.getQueryParams(session)).resolves.toMatchObject({
+      type: 'qq',
+      qq: '123456',
+      isSelf: true,
+    })
+
+    expect(service.consumePendingCommand(session)).toBeNull()
+  })
+
+  it('fails closed for repository-only cosmetic settings while preserving provider preference', async () => {
+    const { QueryService } = task9Api()
+    const bind = new MemoryBindRepository()
+    const setting = new MemorySettingRepository()
+    bind.set('user-1', '123456')
+    await setting.set('user-1', 'icon', '106103')
+    await setting.set('user-1', 'plate', '100501')
+    await setting.set('user-1', 'prober', 'lxns')
+    const service = new QueryService({ bind, setting })
+
+    await expect(service.getQueryParams({
+      userId: 'user-1',
+      sessionId: 'private:user-1',
+      command: '/mai b50',
+    })).resolves.toMatchObject({
+      settings: { avatar: null, plate: null },
+      provider: 'lxns',
+    })
   })
 
   it('rejects a mentioned target whose QQ binding is unavailable', async () => {
@@ -267,6 +363,23 @@ describe('PendingCommandCache bounds and expiry', () => {
     now += 101
     expect(cache.consume(third)).toBeNull()
     expect(cache.size).toBe(0)
+  })
+
+  it('deletes and clears only the requested user/session scope', () => {
+    const { PendingCommandCache } = task9Api()
+    const cache = new PendingCommandCache({ maxEntries: 8, ttlMs: 60_000 })
+    const first = { userId: 'user-1', sessionId: 'session-1' }
+    const second = { userId: 'user-1', sessionId: 'session-2' }
+    cache.set(first, 'first')
+    cache.set(second, 'second')
+
+    expect(cache.delete(first)).toBe(true)
+    expect(cache.consume(first)).toBeNull()
+    cache.set(first, 'replacement')
+    cache.clearScope(first)
+
+    expect(cache.consume(first)).toBeNull()
+    expect(cache.consume(second)).toBe('second')
   })
 })
 
@@ -506,6 +619,21 @@ describe('SettingService', () => {
     expect(await setting.get('user-1', 'plate')).toBeNull()
   })
 
+  it('denies an achievement plate whose acquisition requirement list is empty', async () => {
+    const { SettingService } = task9Api()
+    const setting = new MemorySettingRepository()
+    const { data } = settingsData()
+    const plate = data.plates.get(100502)!
+    data.plates.set(100502, { ...plate, requires: [] })
+    const service = new SettingService(data, { setting }, {
+      achievementRecords: async () => [],
+    })
+
+    await expect(service.setPlate('user-1', '真将'))
+      .rejects.toMatchObject({ name: 'PlateNotAcquiredError' })
+    expect(await setting.get('user-1', 'plate')).toBeNull()
+  })
+
   it('does not query records for an ordinary cosmetic plate', async () => {
     const { SettingService } = task9Api()
     const setting = new MemorySettingRepository()
@@ -528,6 +656,7 @@ describe('SettingService', () => {
 describe('unified query error messages', () => {
   it.each([
     ['qq-unbound', () => new (task9Api().QqBindingRequiredError)({ userId: 'u', sessionId: 's' })],
+    ['target-qq-unbound', () => new (task9Api().QueryTargetBindingRequiredError)('target-user')],
     ['provider-unbound', () => new ProviderBindingRequiredError('diving-fish')],
     ['player-not-found', () => new ProviderNotFoundError('diving-fish')],
     ['privacy-denied', () => new ProviderPrivacyError('diving-fish')],
@@ -551,6 +680,15 @@ describe('unified query error messages', () => {
 
     expect(mapQueryError(new ProviderPrivacyError('diving-fish'), { isSelf: true }))
       .toMatchObject({ code: 'privacy-consent-required' })
+  })
+
+  it('does not tell the requester to bind their own QQ for an unbound mentioned target', () => {
+    const { mapQueryError, QueryTargetBindingRequiredError } = task9Api()
+
+    const result = mapQueryError(new QueryTargetBindingRequiredError('target-user'))
+
+    expect(result).toMatchObject({ code: 'target-qq-unbound' })
+    expect(result.text).not.toContain('/bind')
   })
 
   it('rethrows cancellation instead of turning it into a user message', () => {

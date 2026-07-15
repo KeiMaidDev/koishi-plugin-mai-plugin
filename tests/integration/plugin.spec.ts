@@ -121,6 +121,17 @@ describe('maimai plugin lifecycle', () => {
     const schema = ConfigSchema.toJSON()
     const resolve = (uid: number) => schema.refs[uid]
     const object = resolve(schema.uid).dict
+    const assertChineseDescriptions = (uid: number, path: string) => {
+      const current = resolve(uid)
+      expect(current.meta?.description, `${path} should have a Chinese description`)
+        .toMatch(/[\u4e00-\u9fff]/u)
+      for (const [key, childUid] of Object.entries(current.dict ?? {})) {
+        assertChineseDescriptions(childUid as number, `${path}.${key}`)
+      }
+    }
+    for (const [key, uid] of Object.entries(object)) {
+      assertChineseDescriptions(uid as number, key)
+    }
     const developerTokens = resolve(object.developerTokens).dict
     const oauth = resolve(object.oauth).dict
     const render = resolve(object.render).dict

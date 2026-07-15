@@ -2,11 +2,7 @@
 
 These PNGs are deterministic geometric assets authored by this project. They contain no external artwork, game captures, logos, or copied Shinobu pixels.
 
-Regenerate them explicitly with:
-
-```text
-yarn workspace koishi-plugin-mai-plugin generate:render-assets
-```
+The generated files are checked into the plugin because they are required at runtime.
 
 The Kotlin source was inspected for missing Shinobu names. Functional mappings are:
 
@@ -18,5 +14,3 @@ The Kotlin source was inspected for missing Shinobu names. Functional mappings a
 - `base_Utage.png` -> `utage-icon.png` plus the required `#ff6ffd` difficulty color
 
 Type, genre, version, level, score digit, and life digit image families are replaced by bundled-font text and stable Node layouts.
-
-Generation source: `scripts/generate-render-assets.mjs`. Sharp is used only during this explicit build-time generation step.

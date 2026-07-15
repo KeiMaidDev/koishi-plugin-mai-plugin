@@ -19,19 +19,6 @@
     "url": "https://github.com/KeiMaidDev/koishi-plugin-mai-plugin/issues"
   },
   "license": "MIT",
-  "engines": {
-    "node": ">=18"
-  },
-  "scripts": {
-    "generate:render-baselines": "node scripts/generate-render-baselines.mjs",
-    "generate:render-assets": "node scripts/generate-render-assets.mjs",
-    "compare:images": "vite-node --script scripts/compare-images.ts",
-    "seed:linux-render-baselines": "node scripts/generate-render-baselines.mjs --seed-linux-from-windows",
-    "test": "vitest run --testTimeout=15000",
-    "test:integration": "vitest run tests/integration/plugin.spec.ts",
-    "test:full-flow": "vitest run tests/integration/full-flow.spec.ts",
-    "test:stress": "vitest run tests/render/stress.spec.ts --testTimeout=300000 --maxWorkers=1 --pool=threads"
-  },
   "keywords": [
     "chatbot",
     "koishi",
@@ -48,15 +35,6 @@
         "server"
       ]
     }
-  },
-  "devDependencies": {
-    "@koishijs/plugin-database-memory": "^3.7.0",
-    "@koishijs/plugin-mock": "^2.6.6",
-    "@koishijs/plugin-server": "^3.2.9",
-    "@types/node": "^18.19.0",
-    "typescript": "^5.8.3",
-    "vite-node": "3.2.4",
-    "vitest": "3.2.6"
   },
   "dependencies": {
     "@guswpm/damerau-levenshtein": "1.2.1",

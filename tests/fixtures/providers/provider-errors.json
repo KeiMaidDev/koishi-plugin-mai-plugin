@@ -1,9 +1,0 @@
-{
-  "authorization": { "status": 401, "body": { "success": false, "code": 401, "message": "invalid developer token" } },
-  "privacy": { "status": 403, "body": { "success": false, "code": 403, "message": "privacy denied" } },
-  "notFound": { "status": 404, "body": { "success": false, "code": 404, "message": "player not found" } },
-  "noData": { "status": 200, "body": { "success": true, "code": 200, "message": "no data", "data": null } },
-  "unbound": { "status": 400, "body": { "success": false, "code": 400, "message": "QQ is unbound" } },
-  "oauthRequired": { "status": 401, "body": { "success": false, "code": 401, "message": "OAuth authorization required" } },
-  "malformed": { "status": 200, "body": { "success": true, "code": 200, "data": { "rating": "not-a-number" } } }
-}

@@ -132,10 +132,10 @@ QQ 平台上的帮助、绑定、OAuth、分页和可恢复错误使用非空 `q
 - 资源同步只接受 HTTP(S)；生产环境应使用 HTTPS，并显式设置 `resourceSync.allowedHosts` 白名单。清单与文件均校验大小和摘要。
 - 舞萌页面响应限制为 5 MiB，每页最多解析 5000 条记录；Cookie 数量和转发总长度也有限制。
 - 用户正则最长 128 字符，并在受限 worker/超时内执行。Takumi 只接收内部节点，不渲染用户提供的 HTML/CSS。
-- 渲染并发和队列必须按机器内存调低。独立压力脚本使用原生并发 1 和单 worker thread，参考测试机的混合 64 请求峰值 RSS 约 461 MiB；生产默认并发 4 可能更高，实际值也会随平台和素材变化。
+- 渲染并发和队列必须按机器内存调低。生产默认并发为 4，实际内存占用会随平台、查询内容和素材变化。
 - 定期检查 `yarn npm audit` 和 Koishi 安全公告。不要在未评估兼容性的情况下执行强制降级或强制修复。
 
-## 构建与验收
+## 构建
 
 正式构建只使用根工作区 Yakumo 管线：
 
@@ -144,13 +144,4 @@ cd C:\koishi-app
 yarn build mai-plugin
 ```
 
-常规测试使用 `yarn workspace koishi-plugin-mai-plugin test`；完整流程和压力测试分别使用 `test:full-flow` 与 `test:stress` 脚本。压力测试实际同时提交 16 个 B50、16 个等级表和 64 个混合请求，并输出吞吐、P95、峰值 RSS 和错误数。重型批次只由 `test:stress` 启用并在独立单 worker thread 中运行；常规测试会跳过该批次，避免与正在运行的 Koishi 实例争抢内存。
-
-比较两张同尺寸 PNG：
-
-```powershell
-yarn workspace koishi-plugin-mai-plugin compare:images -- actual.png expected.png --threshold 0.005
-yarn workspace koishi-plugin-mai-plugin compare:images -- actual.png expected.png --region cover:40,120,280,280
-```
-
-全图和每个关键区域都必须不高于 0.5% 变化率。平台基线生成与 Linux 基线状态说明见 `tests/render/baselines/README.md`。
+插件不自带构建、测试或资源生成工具；TypeScript、Yakumo 与相关开发依赖统一由 Koishi 根工作区提供。

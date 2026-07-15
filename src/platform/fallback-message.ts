@@ -63,9 +63,9 @@ export class FilterTooManyError extends Error {
 }
 
 const messages: Record<QueryErrorCode, string> = {
-  'qq-unbound': '为了继续后续查询，请输入"/bind qq号"绑定您的QQ号：',
+  'qq-unbound': '为了继续后续查询，请发送“/mai 绑定 <QQ 号>”绑定您的 QQ 号。',
   'target-qq-unbound': '被提及的用户尚未绑定QQ号，无法作为查询目标。',
-  'provider-unbound': '您还未在查分器上绑定QQ号，请前往水鱼/落雪查分器设置您的QQ号。',
+  'provider-unbound': '您还未绑定查分器。可发送“/mai 绑定落雪”，或发送“/mai 绑定水鱼 <导入 Token>”。',
   'player-not-found': '您查询的用户不存在。',
   'privacy-denied': '您查询的用户设置了查分器隐私或未同意查分器协议，请检查设置。',
   'privacy-consent-required': '请先前往查分器同意用户协议再进行查询。',
@@ -74,7 +74,7 @@ const messages: Record<QueryErrorCode, string> = {
   'filter-too-many': '在当前条件下查询到的曲目过多，请缩小范围。',
   unsupported: '当前查分器不支持该功能。',
   'oauth-required': '该功能需要您在查分器授权BOT访问您的成绩信息。',
-  unknown: '查询失败，请重试。',
+  unknown: '查询失败，请重试，或发送“/mai”返回帮助。',
 }
 
 function errorMessage(code: QueryErrorCode, text = messages[code]): QueryErrorMessage {

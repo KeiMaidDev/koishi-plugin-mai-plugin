@@ -1,7 +1,6 @@
 import type { Command, Context, Middleware, Session } from 'koishi'
 import type { SettingRepository } from '../database/repositories'
 import { isAdministrator } from '../platform/admin'
-import { createQqNativeMarkdown } from '../platform/qq-message'
 import { GuessDeliveryError } from '../services/guess-service'
 import type {
   GuessHandleResult,
@@ -13,6 +12,7 @@ import type {
 } from '../services/guess-service'
 import {
   commandAction,
+  createQqCommandGuidance,
   replyImage,
   replyText,
   type ActiveCommandSession,
@@ -55,8 +55,15 @@ async function sendGuessReply(
   dependencies: GuessCommandDependencies,
   reply: GuessReply,
 ) {
+  const rich = createQqCommandGuidance(reply.text, [[{
+    id: 'guess-help',
+    label: '返回帮助',
+    command: '/mai',
+    enter: true,
+    reply: true,
+  }]])
   if (reply.type === 'text') {
-    await replyText(session, dependencies, reply.text, createQqNativeMarkdown(reply.text))
+    await replyText(session, dependencies, reply.text, rich)
     return
   }
   await replyImage(
@@ -64,7 +71,7 @@ async function sendGuessReply(
     dependencies,
     reply.image,
     reply.text,
-    createQqNativeMarkdown(reply.text),
+    rich,
   )
 }
 

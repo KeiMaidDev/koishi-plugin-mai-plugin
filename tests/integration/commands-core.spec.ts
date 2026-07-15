@@ -1344,15 +1344,74 @@ describe('core maimai commands', () => {
     expect(downstream).toHaveBeenCalledTimes(1)
   })
 
-  it('uses Task 10 rich replies only when QQ compatibility mode is off', async () => {
+  it('uses actionable QQ raw markdown help only when compatibility mode is off', async () => {
     const dependencies = createDependencies()
     const app = await createApp(dependencies)
     const client = app.mock.client('10001')
     client.event.platform = 'qq'
+    const sendMessage = vi.spyOn(client.bot, 'sendMessage')
 
-    await client.shouldReply('/mai', /<qq:rawmarkdown-without-keyboard/)
+    const rich = (await client.receive('/mai')).join('\n')
+    expect(rich).toContain('<qq:rawmarkdown')
+    expect(rich).not.toContain('rawmarkdown-without-keyboard')
+    const [helpElement] = sendMessage.mock.calls[0][1] as any[]
+    const helpButtons = helpElement.attrs.keyboard.content.rows.flatMap(row => row.buttons)
+    expect(helpElement.type).toBe('qq:rawmarkdown')
+    expect(helpElement.attrs.markdown.content.trim()).not.toBe('')
+    expect(helpButtons.map(button => button.id)).toEqual(expect.arrayContaining([
+      'help-search',
+      'help-bind',
+    ]))
+    expect(helpButtons.every(button => button.action.type === 2)).toBe(true)
     dependencies.settingService.isCompatibilityMode.mockResolvedValue(true)
     await client.shouldReply('/mai', /https:\/\/otmdb\.cn\/bot\/maimai/)
+  })
+
+  it('uses current-user QQ buttons for binding and provider guidance', async () => {
+    const dependencies = createDependencies()
+    const app = await createApp(dependencies)
+    const client = app.mock.client('10001')
+    client.event.platform = 'qq'
+    const sendMessage = vi.spyOn(client.bot, 'sendMessage')
+
+    dependencies.queryService.getQueryParams.mockRejectedValueOnce(
+      new plugin.QqBindingRequiredError({ userId: '10001', sessionId: 'qq:channel' }),
+    )
+    const qqBinding = (await client.receive('/mai b50')).join('\n')
+    expect(qqBinding).toContain('<qq:rawmarkdown')
+    expect(qqBinding).not.toContain('rawmarkdown-without-keyboard')
+    const qqElement = sendMessage.mock.calls.flatMap(call => call[1] as any[])
+      .find(element => element.type === 'qq:rawmarkdown')
+    expect(qqElement).toBeDefined()
+    expect(qqElement.attrs.markdown.content).toContain('/mai 绑定 <QQ 号>')
+    const [qqButton] = qqElement.attrs.keyboard.content.rows[0].buttons
+    expect(qqButton).toMatchObject({
+      id: 'bind-qq',
+      action: {
+        type: 2,
+        permission: { type: 0, specify_user_ids: ['10001'] },
+        enter: false,
+      },
+    })
+
+    sendMessage.mockClear()
+    dependencies.queryService.rating.mockRejectedValueOnce(
+      new plugin.ProviderBindingRequiredError('diving-fish'),
+    )
+    const providerBinding = (await client.receive('/mai b50')).join('\n')
+    expect(providerBinding).toContain('<qq:rawmarkdown')
+    expect(providerBinding).not.toContain('rawmarkdown-without-keyboard')
+    const providerElement = sendMessage.mock.calls.flatMap(call => call[1] as any[])
+      .find(element => element.type === 'qq:rawmarkdown')
+    expect(providerElement).toBeDefined()
+    expect(providerElement.attrs.markdown.content).toContain('/mai 绑定落雪')
+    expect(providerElement.attrs.markdown.content).toContain('/mai 绑定水鱼 <导入 Token>')
+    const providerButtons = providerElement.attrs.keyboard.content.rows[0].buttons
+    expect(providerButtons.map(button => button.id)).toEqual(['bind-lxns', 'bind-diving-fish'])
+    expect(providerButtons.every(button => (
+      button.action.permission.type === 0
+      && button.action.permission.specify_user_ids[0] === '10001'
+    ))).toBe(true)
   })
 
   it('disposes commands, compatibility middleware, and callback state', async () => {

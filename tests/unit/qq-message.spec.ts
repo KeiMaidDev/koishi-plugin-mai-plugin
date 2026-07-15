@@ -7,28 +7,31 @@ interface NativeMarkdownFactory {
     content: {
       rows: Array<{
         buttons: Array<{
-          render_data: { label: string, style: number }
-          action: {
-            type: number
-            permission: { type: number }
-            data: string
-            enter: boolean
-          }
+          id: string
+          render_data: { label: string, visited_label: string, style: 0 | 1 }
+          action: TestAction
         }>
       }>
     }
   }): h
 }
 
+type TestPermission =
+  | { type: 0, specify_user_ids: string[] }
+  | { type: 2 }
+
 type TestAction = {
-  type: number
-  permission: { type: number }
+  type: 0 | 1 | 2
+  permission: TestPermission
   data: string
-  enter: boolean
+  unsupport_tips: string
+  reply?: boolean
+  enter?: boolean
 }
 
 type TestButton = {
-  render_data: { label: string, style: number }
+  id: string
+  render_data: { label: string, visited_label: string, style: 0 | 1 }
   action: TestAction
 }
 
@@ -77,12 +80,26 @@ function task10Api() {
     createQqNativeMarkdown?: NativeMarkdownFactory
     createQqCommandAction?: (data: string, options?: {
       enter?: boolean
-      permissionType?: number
+      reply?: boolean
+      permission?: TestPermission
+      unsupportTips?: string
     }) => TestAction
     createQqCallbackAction?: (data: string, options?: {
-      permissionType?: number
+      permission?: TestPermission
+      unsupportTips?: string
     }) => TestAction
-    createQqButton?: (label: string, action: TestAction, style?: number) => TestButton
+    createQqUrlAction?: (url: string, options?: {
+      permission?: TestPermission
+      unsupportTips?: string
+    }) => TestAction
+    createQqUserPermission?: (userId: string) => TestPermission
+    createQqButton?: (
+      id: string,
+      label: string,
+      action: TestAction,
+      style?: 0 | 1,
+      visitedLabel?: string,
+    ) => TestButton
     createQqButtonRow?: (buttons: readonly TestButton[]) => TestRow
     createQqKeyboard?: (rows: readonly TestRow[]) => TestKeyboard
     createQqTemplateMarkdown?: (options: {
@@ -152,11 +169,14 @@ describe('QQ native Markdown elements', () => {
       content: {
         rows: [{
           buttons: [{
-            render_data: { label: 'Next', style: 1 },
+            id: 'next',
+            render_data: { label: 'Next', visited_label: 'Next', style: 1 },
             action: {
               type: 2,
               permission: { type: 2 },
               data: '/mai search next',
+              unsupport_tips: '请手动执行 /mai search next',
+              reply: false,
               enter: true,
             },
           }],
@@ -175,43 +195,134 @@ describe('QQ native Markdown elements', () => {
     expect(element.attrs.markdown).not.toHaveProperty('stream')
   })
 
-  it('builds exact command, callback, button, row, and keyboard payloads', () => {
+  it('builds exact official command, callback, URL, button, row, and keyboard payloads', () => {
     const api = task10Api()
     const createQqCommandAction = requireFactory(api.createQqCommandAction, 'createQqCommandAction')
     const createQqCallbackAction = requireFactory(api.createQqCallbackAction, 'createQqCallbackAction')
+    const createQqUrlAction = requireFactory(api.createQqUrlAction, 'createQqUrlAction')
+    const createQqUserPermission = requireFactory(
+      api.createQqUserPermission,
+      'createQqUserPermission',
+    )
     const createQqButton = requireFactory(api.createQqButton, 'createQqButton')
     const createQqButtonRow = requireFactory(api.createQqButtonRow, 'createQqButtonRow')
     const createQqKeyboard = requireFactory(api.createQqKeyboard, 'createQqKeyboard')
 
-    const command = createQqCommandAction('/mai info 123', { enter: true })
+    const userPermission = createQqUserPermission('user-1')
+    const command = createQqCommandAction('/mai info 123', {
+      enter: true,
+      reply: true,
+      unsupportTips: '请手动执行 /mai info 123',
+    })
     const callback = createQqCallbackAction('mai:opaque-token')
+    const url = createQqUrlAction('https://maimai.lxns.net/oauth', {
+      permission: userPermission,
+    })
     const row = createQqButtonRow([
-      createQqButton('Run', command, 1),
-      createQqButton('Next', callback, 0),
+      createQqButton('run', 'Run', command, 1, 'Run again'),
+      createQqButton('next', 'Next', callback, 0),
+      createQqButton('oauth', 'Authorize', url, 1, 'Authorize again'),
     ])
 
     expect(command).toEqual({
       type: 2,
       permission: { type: 2 },
       data: '/mai info 123',
+      unsupport_tips: '请手动执行 /mai info 123',
+      reply: true,
       enter: true,
     })
     expect(callback).toEqual({
       type: 1,
       permission: { type: 2 },
       data: 'mai:opaque-token',
-      enter: false,
+      unsupport_tips: '当前客户端不支持此按钮。',
+    })
+    expect(userPermission).toEqual({
+      type: 0,
+      specify_user_ids: ['user-1'],
+    })
+    expect(url).toEqual({
+      type: 0,
+      permission: userPermission,
+      data: 'https://maimai.lxns.net/oauth',
+      unsupport_tips: '请复制正文中的 HTTPS 链接后打开。',
     })
     expect(createQqKeyboard([row])).toEqual({
       content: {
         rows: [{
           buttons: [
-            { render_data: { label: 'Run', style: 1 }, action: command },
-            { render_data: { label: 'Next', style: 0 }, action: callback },
+            {
+              id: 'run',
+              render_data: { label: 'Run', visited_label: 'Run again', style: 1 },
+              action: command,
+            },
+            {
+              id: 'next',
+              render_data: { label: 'Next', visited_label: 'Next', style: 0 },
+              action: callback,
+            },
+            {
+              id: 'oauth',
+              render_data: {
+                label: 'Authorize',
+                visited_label: 'Authorize again',
+                style: 1,
+              },
+              action: url,
+            },
           ],
         }],
       },
     })
+  })
+
+  it.each([
+    'http://example.com',
+    'javascript:alert(1)',
+    'data:text/plain,secret',
+    '//example.com/path',
+    '/relative/path',
+  ])('rejects unsafe URL button target %s', (target) => {
+    const createQqUrlAction = requireFactory(task10Api().createQqUrlAction, 'createQqUrlAction')
+
+    expect(() => createQqUrlAction(target)).toThrow(/HTTPS/)
+  })
+
+  it('rejects invalid user permissions, blank markdown, oversized keyboards, and duplicate IDs', () => {
+    const api = task10Api()
+    const createQqUserPermission = requireFactory(
+      api.createQqUserPermission,
+      'createQqUserPermission',
+    )
+    const createQqCommandAction = requireFactory(api.createQqCommandAction, 'createQqCommandAction')
+    const createQqButton = requireFactory(api.createQqButton, 'createQqButton')
+    const createQqButtonRow = requireFactory(api.createQqButtonRow, 'createQqButtonRow')
+    const createQqKeyboard = requireFactory(api.createQqKeyboard, 'createQqKeyboard')
+    const createQqNativeMarkdown = requireFactory(
+      api.createQqNativeMarkdown,
+      'createQqNativeMarkdown',
+    )
+    const action = createQqCommandAction('/mai')
+    const buttons = Array.from({ length: 6 }, (_, index) => (
+      createQqButton(`button-${index}`, `Button ${index}`, action)
+    ))
+
+    expect(() => createQqUserPermission('   ')).toThrow(/user ID/)
+    expect(() => createQqButtonRow([])).toThrow(/1.*5/)
+    expect(() => createQqButtonRow(buttons)).toThrow(/1.*5/)
+    expect(() => createQqKeyboard([])).toThrow(/1.*5/)
+    expect(() => createQqKeyboard(Array(6).fill(createQqButtonRow(buttons.slice(0, 1)))))
+      .toThrow(/1.*5/)
+    expect(() => createQqKeyboard([
+      createQqButtonRow([
+        createQqButton('duplicate', 'One', action),
+        createQqButton('duplicate', 'Two', action),
+      ]),
+    ])).toThrow(/unique/i)
+    expect(() => createQqNativeMarkdown('   ', createQqKeyboard([
+      createQqButtonRow(buttons.slice(0, 1)),
+    ]))).toThrow(/non-empty/)
   })
 
   it('uses template Markdown only for a non-empty template ID and otherwise preserves buttons', () => {
@@ -221,7 +332,17 @@ describe('QQ native Markdown elements', () => {
       'createQqTemplateMarkdown',
     )
     const createQqKeyboard = requireFactory(api.createQqKeyboard, 'createQqKeyboard')
-    const keyboard = createQqKeyboard([])
+    const createQqCommandAction = requireFactory(
+      api.createQqCommandAction,
+      'createQqCommandAction',
+    )
+    const createQqButton = requireFactory(api.createQqButton, 'createQqButton')
+    const createQqButtonRow = requireFactory(api.createQqButtonRow, 'createQqButtonRow')
+    const keyboard = createQqKeyboard([
+      createQqButtonRow([
+        createQqButton('help', 'Help', createQqCommandAction('/mai')),
+      ]),
+    ])
     const params = [{ key: 'text1', values: ['result'] }]
 
     const template = createQqTemplateMarkdown({
@@ -296,12 +417,24 @@ describe('QQ native Markdown elements', () => {
     expect(requestedPages).toEqual([1, 3])
     expect(row.buttons).toEqual([
       {
-        render_data: { label: 'Previous', style: 0 },
-        action: { type: 1, permission: { type: 2 }, data: 'mai:token-1', enter: false },
+        id: 'page-1',
+        render_data: { label: 'Previous', visited_label: 'Previous', style: 0 },
+        action: {
+          type: 1,
+          permission: { type: 2 },
+          data: 'mai:token-1',
+          unsupport_tips: '当前客户端不支持此按钮。',
+        },
       },
       {
-        render_data: { label: 'Next', style: 0 },
-        action: { type: 1, permission: { type: 2 }, data: 'mai:token-3', enter: false },
+        id: 'page-3',
+        render_data: { label: 'Next', visited_label: 'Next', style: 0 },
+        action: {
+          type: 1,
+          permission: { type: 2 },
+          data: 'mai:token-3',
+          unsupport_tips: '当前客户端不支持此按钮。',
+        },
       },
     ])
   })

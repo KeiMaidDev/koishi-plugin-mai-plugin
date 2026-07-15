@@ -1224,10 +1224,19 @@ describe('maimai guessing games', () => {
     richClient.event.platform = 'qq'
     const fallbackClient = asGroup(app.mock.client('ordinary', 'qq-fallback'))
     fallbackClient.event.platform = 'qq'
+    const sendMessage = vi.spyOn(richClient.bot, 'sendMessage')
 
     try {
       const rich = await richClient.receive('猜歌')
-      expect(rich.join('\n')).toContain('<qq:rawmarkdown-without-keyboard')
+      expect(rich.join('\n')).toContain('<qq:rawmarkdown')
+      expect(rich.join('\n')).not.toContain('rawmarkdown-without-keyboard')
+      const richElements = sendMessage.mock.calls.flatMap(call => call[1] as any[])
+      expect(richElements.length).toBeGreaterThan(0)
+      expect(richElements.every(element => element.type === 'qq:rawmarkdown')).toBe(true)
+      expect(richElements.every(element => (
+        element.attrs.markdown.content.trim()
+        && element.attrs.keyboard.content.rows[0].buttons[0].id === 'guess-help'
+      ))).toBe(true)
 
       dependencies.settingService.isCompatibilityMode.mockResolvedValue(true)
       const fallback = await fallbackClient.receive('猜歌')

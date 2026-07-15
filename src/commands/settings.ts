@@ -6,6 +6,7 @@ import {
 } from '../services/setting-service'
 import {
   commandAction,
+  createQqCommandGuidance,
   replyText,
   type ActiveCommandSession,
   type CoreCommandDependencies,
@@ -61,7 +62,16 @@ export function registerSettingsCommands(
     .action(commandAction(async ({ session }, qq = '') => {
       const normalized = qq.trim()
       if (!/^\d{5,20}$/.test(normalized)) {
-        await replyText(session, dependencies, '用法：bind <QQ 号>')
+        const text = '用法：/mai 绑定 <QQ 号>'
+        await replyText(session, dependencies, text, createQqCommandGuidance(text, [[{
+          id: 'bind-qq',
+          label: '绑定 QQ',
+          command: '/mai 绑定',
+          enter: false,
+          reply: true,
+          userId: session.userId,
+          unsupportTips: '请在正文命令后补充 QQ 号并手动发送。',
+        }]]))
         return
       }
       try {

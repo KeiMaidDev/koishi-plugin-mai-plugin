@@ -11,23 +11,43 @@ const supportedQqMarkdownElementTypes = new Set([
   'qq:markdown',
 ])
 
-export interface QqButtonPermission {
-  type: number
-}
+export type QqButtonPermission =
+  | { type: 0, specify_user_ids: string[] }
+  | { type: 2 }
 
-export interface QqButtonAction {
-  type: 1 | 2
+interface QqButtonActionBase {
   permission: QqButtonPermission
   data: string
+  unsupport_tips: string
+}
+
+export interface QqUrlButtonAction extends QqButtonActionBase {
+  type: 0
+}
+
+export interface QqCallbackButtonAction extends QqButtonActionBase {
+  type: 1
+}
+
+export interface QqCommandButtonAction extends QqButtonActionBase {
+  type: 2
+  reply: boolean
   enter: boolean
 }
 
+export type QqButtonAction =
+  | QqUrlButtonAction
+  | QqCallbackButtonAction
+  | QqCommandButtonAction
+
 export interface QqButtonRenderData {
   label: string
-  style: number
+  visited_label: string
+  style: 0 | 1
 }
 
 export interface QqButton {
+  id: string
   render_data: QqButtonRenderData
   action: QqButtonAction
 }
@@ -43,8 +63,13 @@ export interface QqKeyboard {
 }
 
 export interface QqButtonActionOptions {
-  permissionType?: number
+  permission?: QqButtonPermission
+  unsupportTips?: string
+}
+
+export interface QqCommandButtonActionOptions extends QqButtonActionOptions {
   enter?: boolean
+  reply?: boolean
 }
 
 export interface QqMarkdownParameter {
@@ -78,48 +103,108 @@ export interface SendReplyOptions {
 
 export function createQqCommandAction(
   data: string,
-  options: QqButtonActionOptions = {},
-): QqButtonAction {
+  options: QqCommandButtonActionOptions = {},
+): QqCommandButtonAction {
   return {
     type: 2,
-    permission: { type: options.permissionType ?? 2 },
-    data,
+    permission: resolvePermission(options.permission),
+    data: commandData(data),
+    unsupport_tips: resolveUnsupportTips(
+      options.unsupportTips,
+      '请在聊天中手动执行正文中的命令。',
+    ),
+    reply: options.reply ?? false,
     enter: options.enter ?? false,
   }
 }
 
 export function createQqCallbackAction(
   data: string,
-  options: Omit<QqButtonActionOptions, 'enter'> = {},
-): QqButtonAction {
+  options: QqButtonActionOptions = {},
+): QqCallbackButtonAction {
   return {
     type: 1,
-    permission: { type: options.permissionType ?? 2 },
-    data,
-    enter: false,
+    permission: resolvePermission(options.permission),
+    data: nonEmpty(data, 'QQ callback data'),
+    unsupport_tips: resolveUnsupportTips(options.unsupportTips),
   }
 }
 
+export function createQqUrlAction(
+  target: string,
+  options: QqButtonActionOptions = {},
+): QqUrlButtonAction {
+  let url: URL
+  try {
+    url = new URL(target)
+  } catch {
+    throw new TypeError('QQ URL buttons require an absolute HTTPS URL.')
+  }
+  if (url.protocol !== 'https:' || url.username || url.password) {
+    throw new TypeError('QQ URL buttons require an absolute HTTPS URL.')
+  }
+  return {
+    type: 0,
+    permission: resolvePermission(options.permission),
+    data: url.href,
+    unsupport_tips: resolveUnsupportTips(
+      options.unsupportTips,
+      '请复制正文中的 HTTPS 链接后打开。',
+    ),
+  }
+}
+
+export function createQqUserPermission(userId: string): QqButtonPermission {
+  return { type: 0, specify_user_ids: [nonEmpty(userId, 'QQ button user ID')] }
+}
+
 export function createQqButton(
+  id: string,
   label: string,
   action: QqButtonAction,
-  style = 1,
+  style: 0 | 1 = 1,
+  visitedLabel = label,
 ): QqButton {
+  if (style !== 0 && style !== 1) {
+    throw new TypeError('QQ button style must be 0 or 1.')
+  }
   return {
-    render_data: { label, style },
+    id: nonEmpty(id, 'QQ button ID'),
+    render_data: {
+      label: nonEmpty(label, 'QQ button label'),
+      visited_label: nonEmpty(visitedLabel, 'QQ button visited label'),
+      style,
+    },
     action,
   }
 }
 
 export function createQqButtonRow(buttons: readonly QqButton[]): QqButtonRow {
+  if (buttons.length < 1 || buttons.length > 5) {
+    throw new RangeError('QQ button rows must contain 1 to 5 buttons.')
+  }
   return { buttons: [...buttons] }
 }
 
 export function createQqKeyboard(rows: readonly QqButtonRow[]): QqKeyboard {
+  if (rows.length < 1 || rows.length > 5) {
+    throw new RangeError('QQ keyboards must contain 1 to 5 rows.')
+  }
+  const ids = new Set<string>()
+  for (const row of rows) {
+    if (row.buttons.length < 1 || row.buttons.length > 5) {
+      throw new RangeError('QQ button rows must contain 1 to 5 buttons.')
+    }
+    for (const button of row.buttons) {
+      if (ids.has(button.id)) throw new TypeError('QQ button IDs must be unique within a keyboard.')
+      ids.add(button.id)
+    }
+  }
   return { content: { rows: [...rows] } }
 }
 
 export function createQqNativeMarkdown(content: string, keyboard?: QqKeyboard) {
+  nonEmpty(content, 'QQ raw markdown content')
   if (!keyboard) {
     return h('qq:rawmarkdown-without-keyboard', { content })
   }
@@ -127,6 +212,33 @@ export function createQqNativeMarkdown(content: string, keyboard?: QqKeyboard) {
     markdown: { content },
     keyboard,
   })
+}
+
+function nonEmpty(value: string, field: string) {
+  const normalized = value.trim()
+  if (!normalized) throw new TypeError(`${field} must be non-empty.`)
+  return normalized
+}
+
+function commandData(data: string) {
+  const normalized = nonEmpty(data, 'QQ command data')
+  if (/[\r\n]/u.test(normalized)) throw new TypeError('QQ command data must be a single line.')
+  return normalized
+}
+
+function resolvePermission(permission: QqButtonPermission = { type: 2 }): QqButtonPermission {
+  if (permission.type === 2) return { type: 2 }
+  if (permission.type !== 0 || permission.specify_user_ids.length !== 1) {
+    throw new TypeError('QQ private button permissions require exactly one user ID.')
+  }
+  return createQqUserPermission(permission.specify_user_ids[0])
+}
+
+function resolveUnsupportTips(
+  tips: string | undefined,
+  fallback = '当前客户端不支持此按钮。',
+) {
+  return tips === undefined ? fallback : nonEmpty(tips, 'QQ button unsupported tips')
 }
 
 export function createQqTemplateMarkdown(options: QqTemplateMarkdownOptions) {
@@ -165,6 +277,7 @@ export function createPagedCallbackButtons(
   const buttons: QqButton[] = []
   if (options.page > 1) {
     buttons.push(createQqButton(
+      `page-${options.page - 1}`,
       options.previousLabel ?? '上一页',
       createQqCallbackAction(options.callbackData(options.page - 1)),
       0,
@@ -172,12 +285,13 @@ export function createPagedCallbackButtons(
   }
   if (options.page < options.totalPages) {
     buttons.push(createQqButton(
+      `page-${options.page + 1}`,
       options.nextLabel ?? '下一页',
       createQqCallbackAction(options.callbackData(options.page + 1)),
       0,
     ))
   }
-  return createQqButtonRow(buttons)
+  return buttons.length ? createQqButtonRow(buttons) : { buttons }
 }
 
 function createFallbackElement(element: FallbackElement) {

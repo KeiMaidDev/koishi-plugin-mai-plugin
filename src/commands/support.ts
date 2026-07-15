@@ -3,7 +3,14 @@ import type { Command, Context, Fragment, Session } from 'koishi'
 import type { CourseInfo, IconInfo, PlateInfo } from '../data/normalizers'
 import type { BindRepository, SettingRepository } from '../database/repositories'
 import type { MusicInfo } from '../domain/music'
-import { createQqNativeMarkdown } from '../platform/qq-message'
+import {
+  createQqButton,
+  createQqButtonRow,
+  createQqCommandAction,
+  createQqKeyboard,
+  createQqNativeMarkdown,
+  createQqUserPermission,
+} from '../platform/qq-message'
 import { sendReply } from '../platform/qq-message'
 import type { CommandCallbackRouter } from '../platform/command-router'
 import type { MaiRenderer } from '../render/mai-renderer'
@@ -89,6 +96,40 @@ export interface CoreCommandDependencies {
 export interface ReplyCommandDependencies {
   settingService?: Pick<SettingService, 'isCompatibilityMode'>
   compatibilityMode?: boolean
+}
+
+export interface QqCommandGuidanceButton {
+  id: string
+  label: string
+  command: string
+  visitedLabel?: string
+  style?: 0 | 1
+  enter: boolean
+  reply: boolean
+  userId?: string
+  unsupportTips?: string
+}
+
+export function createQqCommandGuidance(
+  content: string,
+  rows: readonly (readonly QqCommandGuidanceButton[])[],
+) {
+  return createQqNativeMarkdown(content, createQqKeyboard(rows.map(row => (
+    createQqButtonRow(row.map(button => createQqButton(
+      button.id,
+      button.label,
+      createQqCommandAction(button.command, {
+        ...(button.userId
+          ? { permission: createQqUserPermission(button.userId) }
+          : {}),
+        enter: button.enter,
+        reply: button.reply,
+        unsupportTips: button.unsupportTips,
+      }),
+      button.style,
+      button.visitedLabel,
+    )))
+  ))))
 }
 
 export type CoreCommandContext = Pick<Context, 'command'>
@@ -180,7 +221,48 @@ export async function replyQueryError(
       return
     }
   }
-  await replyText(session, dependencies, mapQueryError(error, { isSelf }).text)
+  const message = mapQueryError(error, { isSelf })
+  if (message.code === 'qq-unbound') {
+    await replyText(session, dependencies, message.text, createQqCommandGuidance(message.text, [[{
+      id: 'bind-qq',
+      label: '绑定 QQ',
+      command: '/mai 绑定',
+      enter: false,
+      reply: true,
+      userId: session.userId,
+      unsupportTips: '请在正文命令后补充 QQ 号并手动发送。',
+    }]]))
+    return
+  }
+  if (message.code === 'provider-unbound') {
+    await replyText(session, dependencies, message.text, createQqCommandGuidance(message.text, [[
+      {
+        id: 'bind-lxns',
+        label: '绑定落雪',
+        command: '/mai 绑定落雪',
+        enter: true,
+        reply: true,
+        userId: session.userId,
+      },
+      {
+        id: 'bind-diving-fish',
+        label: '绑定水鱼',
+        command: '/mai 绑定水鱼',
+        enter: false,
+        reply: true,
+        userId: session.userId,
+        unsupportTips: '请在正文命令后补充水鱼导入 Token 并手动发送。',
+      },
+    ]]))
+    return
+  }
+  await replyText(session, dependencies, message.text, createQqCommandGuidance(message.text, [[{
+    id: 'error-help',
+    label: '返回帮助',
+    command: '/mai',
+    enter: true,
+    reply: true,
+  }]]))
 }
 
 export async function replyImage(

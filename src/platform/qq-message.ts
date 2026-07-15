@@ -11,9 +11,7 @@ const supportedQqMarkdownElementTypes = new Set([
   'qq:markdown',
 ])
 
-export type QqButtonPermission =
-  | { type: 0, specify_user_ids: string[] }
-  | { type: 2 }
+export type QqButtonPermission = { type: 2 }
 
 interface QqButtonActionBase {
   permission: QqButtonPermission
@@ -63,7 +61,6 @@ export interface QqKeyboard {
 }
 
 export interface QqButtonActionOptions {
-  permission?: QqButtonPermission
   unsupportTips?: string
 }
 
@@ -107,7 +104,7 @@ export function createQqCommandAction(
 ): QqCommandButtonAction {
   return {
     type: 2,
-    permission: resolvePermission(options.permission),
+    permission: { type: 2 },
     data: commandData(data),
     unsupport_tips: resolveUnsupportTips(
       options.unsupportTips,
@@ -124,7 +121,7 @@ export function createQqCallbackAction(
 ): QqCallbackButtonAction {
   return {
     type: 1,
-    permission: resolvePermission(options.permission),
+    permission: { type: 2 },
     data: nonEmpty(data, 'QQ callback data'),
     unsupport_tips: resolveUnsupportTips(options.unsupportTips),
   }
@@ -145,17 +142,13 @@ export function createQqUrlAction(
   }
   return {
     type: 0,
-    permission: resolvePermission(options.permission),
+    permission: { type: 2 },
     data: url.href,
     unsupport_tips: resolveUnsupportTips(
       options.unsupportTips,
       '请复制正文中的 HTTPS 链接后打开。',
     ),
   }
-}
-
-export function createQqUserPermission(userId: string): QqButtonPermission {
-  return { type: 0, specify_user_ids: [nonEmpty(userId, 'QQ button user ID')] }
 }
 
 export function createQqButton(
@@ -224,14 +217,6 @@ function commandData(data: string) {
   const normalized = nonEmpty(data, 'QQ command data')
   if (/[\r\n]/u.test(normalized)) throw new TypeError('QQ command data must be a single line.')
   return normalized
-}
-
-function resolvePermission(permission: QqButtonPermission = { type: 2 }): QqButtonPermission {
-  if (permission.type === 2) return { type: 2 }
-  if (permission.type !== 0 || permission.specify_user_ids.length !== 1) {
-    throw new TypeError('QQ private button permissions require exactly one user ID.')
-  }
-  return createQqUserPermission(permission.specify_user_ids[0])
 }
 
 function resolveUnsupportTips(

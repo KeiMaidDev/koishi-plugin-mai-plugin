@@ -1,6 +1,5 @@
 import { randomBytes as secureRandomBytes } from 'node:crypto'
 import type { Awaitable } from '../types'
-import { hasAuthority } from './admin'
 
 const TOKEN_BYTES = 18
 const TOKEN_PATTERN = /^mai:[A-Za-z0-9_-]{24}$/
@@ -31,8 +30,6 @@ export type PaginationPayload =
 export interface CallbackDispatchContext {
   userId: string
   channelId: string
-  authority?: number
-  permissions?: readonly string[]
 }
 
 export type CallbackHandler<Payload, Result = unknown> = (
@@ -43,11 +40,8 @@ export type CallbackHandler<Payload, Result = unknown> = (
 export interface CallbackRegistration<Payload, Result = unknown> {
   kind: string
   payload: Payload
-  expectedUserId: string
   expectedChannelId: string
   ttlMs?: number
-  requiredAuthority?: number
-  requiredPermission?: string
   handler: CallbackHandler<Payload, Result>
 }
 
@@ -67,10 +61,7 @@ export type CallbackRejectionReason =
   | 'malformed-token'
   | 'unknown-token'
   | 'expired-token'
-  | 'user-mismatch'
   | 'channel-mismatch'
-  | 'insufficient-authority'
-  | 'missing-permission'
 
 export type CallbackDispatchResult<Result = unknown> =
   | { ok: true, kind: string, value: Result }
@@ -79,11 +70,8 @@ export type CallbackDispatchResult<Result = unknown> =
 interface StoredCallback {
   kind: string
   payload: unknown
-  expectedUserId: string
   expectedChannelId: string
   expiresAt: number
-  requiredAuthority?: number
-  requiredPermission?: string
   reusable: boolean
   handler: CallbackHandler<unknown>
 }
@@ -196,21 +184,9 @@ export class CommandCallbackRouter {
       this.callbacks.delete(data)
       return { ok: false, reason: 'expired-token' }
     }
-    if (context.userId !== state.expectedUserId) {
-      return { ok: false, reason: 'user-mismatch' }
-    }
     if (context.channelId !== state.expectedChannelId) {
       return { ok: false, reason: 'channel-mismatch' }
     }
-    if (state.requiredAuthority !== undefined
-      && !hasAuthority(context, state.requiredAuthority)) {
-      return { ok: false, reason: 'insufficient-authority' }
-    }
-    if (state.requiredPermission
-      && !context.permissions?.includes(state.requiredPermission)) {
-      return { ok: false, reason: 'missing-permission' }
-    }
-
     if (!state.reusable) this.callbacks.delete(data)
     const value = await state.handler(clonePayload(state.payload), context)
     return { ok: true, kind: state.kind, value }
@@ -221,17 +197,8 @@ export class CommandCallbackRouter {
     reusable: boolean,
   ) {
     const kind = nonEmpty(registration.kind, 'Callback kind')
-    const expectedUserId = nonEmpty(registration.expectedUserId, 'Expected user ID')
     const expectedChannelId = nonEmpty(registration.expectedChannelId, 'Expected channel ID')
     const ttlMs = positiveInteger(registration.ttlMs ?? this.ttlMs, 'Callback TTL')
-    if (registration.requiredAuthority !== undefined
-      && (!Number.isFinite(registration.requiredAuthority)
-        || registration.requiredAuthority < 0)) {
-      throw new RangeError('Required authority must be a non-negative number.')
-    }
-    if (registration.requiredPermission !== undefined) {
-      nonEmpty(registration.requiredPermission, 'Required permission')
-    }
 
     const now = this.now()
     this.pruneExpired(now)
@@ -245,11 +212,8 @@ export class CommandCallbackRouter {
     this.callbacks.set(token, {
       kind,
       payload: clonePayload(registration.payload),
-      expectedUserId,
       expectedChannelId,
       expiresAt: now + ttlMs,
-      requiredAuthority: registration.requiredAuthority,
-      requiredPermission: registration.requiredPermission,
       reusable,
       handler: registration.handler as CallbackHandler<unknown>,
     })

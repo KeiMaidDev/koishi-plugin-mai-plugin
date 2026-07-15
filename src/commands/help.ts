@@ -26,7 +26,7 @@ export function registerHelpCommand(
             id: 'help-search',
             label: '查歌',
             command: '/mai 查歌',
-            enter: false,
+            enter: true,
             reply: true,
           },
           {
@@ -40,9 +40,8 @@ export function registerHelpCommand(
             id: 'help-bind',
             label: '绑定 QQ',
             command: '/mai 绑定',
-            enter: false,
+            enter: true,
             reply: true,
-            userId: session.userId,
           },
         ],
         [
@@ -50,7 +49,7 @@ export function registerHelpCommand(
             id: 'help-provider',
             label: '设置查分器',
             command: '/mai 设置查分器',
-            enter: false,
+            enter: true,
             reply: true,
           },
           {

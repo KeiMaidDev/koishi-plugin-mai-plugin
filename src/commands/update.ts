@@ -46,7 +46,6 @@ export function createUpdateSessionLocator(
             command: options.retryCommand,
             enter: true,
             reply: true,
-            userId: session.userId,
           }]])
         : undefined,
     ),
@@ -76,7 +75,6 @@ async function updateFailure(
       command: guidanceCommand ?? '/mai',
       enter: true,
       reply: true,
-      userId: session.userId,
     }]]))
   }
   if (error instanceof PublicCallbackUnavailableError || error instanceof UpdateBindingRequiredError) {
@@ -104,7 +102,6 @@ export function registerUpdateCommands(
             label: '前往落雪授权',
             visitedLabel: '重新前往落雪授权',
             url,
-            userId: session.userId,
           }))
         } catch (error) {
           await updateFailure(session, dependencies, error, '/mai 绑定落雪')
@@ -122,7 +119,6 @@ export function registerUpdateCommands(
             command: '/mai 绑定落雪',
             enter: true,
             reply: true,
-            userId: session.userId,
           }]]))
         } catch (error) {
           await updateFailure(session, dependencies, error, '/mai 解绑落雪')

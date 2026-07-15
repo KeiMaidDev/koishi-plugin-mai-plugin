@@ -107,7 +107,7 @@ async function createScoreListPage(
   records: readonly RecordEntry[],
   filter: string,
   requestedPage: number,
-  scope: { userId: string, channelId: string },
+  channelId: string,
 ) {
   const totalPages = Math.max(1, Math.ceil(records.length / SCORE_LIST_PAGE_SIZE))
   const currentPage = Math.min(Math.max(1, requestedPage), totalPages)
@@ -128,8 +128,7 @@ async function createScoreListPage(
     totalPages,
     callbackData: page => dependencies.callbackRouter.registerPagination({
       payload: { mode: 'score-list', filter, page },
-      expectedUserId: scope.userId,
-      expectedChannelId: scope.channelId,
+      expectedChannelId: channelId,
       handler: async payload => (
         await createScoreListPage(
           dependencies,
@@ -138,7 +137,7 @@ async function createScoreListPage(
           records,
           payload.filter,
           payload.page,
-          scope,
+          channelId,
         )
       ).callbackReply,
     }),
@@ -327,7 +326,7 @@ export function registerImageCommands(
           records,
           filterText,
           page,
-          { userId: session.userId, channelId: session.channelId },
+          session.channelId,
         )
         await replyImage(
           session,

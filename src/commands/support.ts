@@ -10,7 +10,6 @@ import {
   createQqKeyboard,
   createQqNativeMarkdown,
   createQqUrlAction,
-  createQqUserPermission,
 } from '../platform/qq-message'
 import { sendReply } from '../platform/qq-message'
 import type { CommandCallbackRouter } from '../platform/command-router'
@@ -108,7 +107,6 @@ export interface QqCommandGuidanceButton {
   style?: 0 | 1
   enter: boolean
   reply: boolean
-  userId?: string
   unsupportTips?: string
 }
 
@@ -116,7 +114,6 @@ export interface QqUrlGuidanceButton {
   id: string
   label: string
   url: string
-  userId: string
   visitedLabel?: string
   style?: 0 | 1
   unsupportTips?: string
@@ -131,9 +128,6 @@ export function createQqCommandGuidance(
       button.id,
       button.label,
       createQqCommandAction(button.command, {
-        ...(button.userId
-          ? { permission: createQqUserPermission(button.userId) }
-          : {}),
         enter: button.enter,
         reply: button.reply,
         unsupportTips: button.unsupportTips,
@@ -150,7 +144,6 @@ export function createQqUrlGuidance(content: string, button: QqUrlGuidanceButton
       button.id,
       button.label,
       createQqUrlAction(button.url, {
-        permission: createQqUserPermission(button.userId),
         unsupportTips: button.unsupportTips,
       }),
       button.style,
@@ -235,7 +228,6 @@ export async function replyQueryError(
                 command: options.retryCommand,
                 enter: true,
                 reply: true,
-                userId: session.userId,
               }]])
             : undefined,
         ),
@@ -257,7 +249,6 @@ export async function replyQueryError(
           label: '前往落雪授权',
           visitedLabel: '重新前往落雪授权',
           url,
-          userId: session.userId,
         }),
       )
       return
@@ -273,7 +264,6 @@ export async function replyQueryError(
             command: '/mai',
             enter: true,
             reply: true,
-            userId: session.userId,
           }]]),
         )
         return
@@ -285,7 +275,6 @@ export async function replyQueryError(
         command: '/mai 绑定落雪',
         enter: true,
         reply: true,
-        userId: session.userId,
       }]]))
       return
     }
@@ -298,7 +287,6 @@ export async function replyQueryError(
       command: '/mai 绑定',
       enter: false,
       reply: true,
-      userId: session.userId,
       unsupportTips: '请在正文命令后补充 QQ 号并手动发送。',
     }]]))
     return
@@ -311,7 +299,6 @@ export async function replyQueryError(
         command: '/mai 绑定落雪',
         enter: true,
         reply: true,
-        userId: session.userId,
       },
       {
         id: 'bind-diving-fish',
@@ -319,7 +306,6 @@ export async function replyQueryError(
         command: '/mai 绑定水鱼',
         enter: false,
         reply: true,
-        userId: session.userId,
         unsupportTips: '请在正文命令后补充水鱼导入 Token 并手动发送。',
       },
     ]]))

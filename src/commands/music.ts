@@ -88,19 +88,18 @@ function createSearchPage(
   results: readonly MusicSearchResult[],
   query: string,
   page: number,
-  scope: { userId: string, channelId: string },
+  channelId: string,
 ) {
   const view = pageText(results, page)
   const callbackData = (targetPage: number) => dependencies.callbackRouter.registerPagination({
     payload: { mode: 'search', query, page: targetPage },
-    expectedUserId: scope.userId,
-    expectedChannelId: scope.channelId,
+    expectedChannelId: channelId,
     handler: payload => createSearchPage(
       dependencies,
       results,
       payload.query,
       payload.page,
-      scope,
+      channelId,
     ).rich,
   })
   const row = createPagedCallbackButtons({
@@ -147,7 +146,7 @@ async function showResults(
     results,
     query,
     page,
-    { userId: session.userId, channelId: session.channelId },
+    session.channelId,
   )
   await replyText(session, dependencies, view.text, view.rich)
 }

@@ -192,14 +192,6 @@ export interface CoreCommandRegistration {
   dispose(): Promise<void>
 }
 
-function callbackPermissions(session: Session) {
-  return [...new Set([
-    ...(session.permissions ?? []),
-    ...((session.user as { permissions?: string[] } | undefined)?.permissions ?? []),
-    ...((session.channel as { permissions?: string[] } | undefined)?.permissions ?? []),
-  ])]
-}
-
 async function dispatchButtonCallback(
   session: Session,
   dependencies: CoreCommandDependencies,
@@ -209,8 +201,6 @@ async function dispatchButtonCallback(
   const result = await dependencies.callbackRouter.dispatch(token, {
     userId: session.userId,
     channelId: session.channelId,
-    authority: (session.user as { authority?: number } | undefined)?.authority,
-    permissions: callbackPermissions(session),
   })
   if (!result.ok || result.value === undefined || result.value === null) return
   await session.send(result.value as Fragment)

@@ -69,7 +69,6 @@ export function registerSettingsCommands(
           command: '/mai 绑定',
           enter: false,
           reply: true,
-          userId: session.userId,
           unsupportTips: '请在正文命令后补充 QQ 号并手动发送。',
         }]]))
         return

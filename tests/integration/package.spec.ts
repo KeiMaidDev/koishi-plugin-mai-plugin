@@ -87,6 +87,20 @@ describe('published package entry', () => {
       await symlink(target, link, process.platform === 'win32' ? 'junction' : 'dir')
     }
 
+    const manifestProbe = `
+      const { readFileSync } = require('node:fs');
+      const manifestPath = require.resolve(${JSON.stringify(`${packageJson.name}/package.json`)});
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+      if (manifest.name !== ${JSON.stringify(packageJson.name)}) {
+        throw new Error('resolved the wrong package manifest');
+      }
+    `
+    await execFileAsync(process.execPath, ['--eval', manifestProbe], {
+      cwd: temporary,
+      encoding: 'utf8',
+      timeout: 30_000,
+    })
+
     const script = `
       const plugin = await import(${JSON.stringify(packageJson.name)});
       if (typeof plugin.apply !== 'function') throw new Error('missing apply export');

@@ -4,6 +4,7 @@ import type {
 } from '../providers/diving-fish'
 import { LXNS_ENDPOINTS } from '../providers/lxns'
 import { CallbackStore } from '../server/callback-store'
+import { resolveLxnsCallbackPath } from '../server/lxns-callback'
 import { load } from 'cheerio'
 import type { Context } from 'koishi'
 
@@ -53,6 +54,7 @@ export interface UpdateServiceOptions {
   publicBaseUrl: string
   oauth: {
     enabled: boolean
+    callbackPath?: string
     clientId: string
   }
   lxns: {
@@ -280,6 +282,10 @@ function publicRoute(base: string, path: string) {
   return new URL(path, publicBaseUrl(base)).href
 }
 
+export function lxnsCallbackUrl(publicUrl: string, callbackPath?: string) {
+  return publicRoute(publicUrl, resolveLxnsCallbackPath(callbackPath))
+}
+
 function validateCallbackUrl(callbackPath: string) {
   if (!callbackPath.startsWith('/')) throw new UpdateFlowError()
   const callback = new URL(callbackPath, WAHLAP_ORIGIN)
@@ -312,7 +318,10 @@ export class UpdateService {
     if (!this.options.oauth.enabled || !this.options.oauth.clientId) {
       throw new PublicCallbackUnavailableError()
     }
-    const redirectUri = publicRoute(this.options.publicBaseUrl, '/mai-plugin/lxns/callback')
+    const redirectUri = lxnsCallbackUrl(
+      this.options.publicBaseUrl,
+      this.options.oauth.callbackPath,
+    )
     const state = this.lxnsStates.issue(session)
     const authorize = new URL(`${LXNS_ENDPOINTS.oauth}/authorize`)
     authorize.searchParams.set('response_type', 'code')
@@ -325,7 +334,10 @@ export class UpdateService {
   async completeLxnsOAuth(state: string, code: string) {
     this.assertActive()
     const session = this.lxnsStates.consume(state)
-    const redirectUri = publicRoute(this.options.publicBaseUrl, '/mai-plugin/lxns/callback')
+    const redirectUri = lxnsCallbackUrl(
+      this.options.publicBaseUrl,
+      this.options.oauth.callbackPath,
+    )
     try {
       await this.options.lxns.exchangeOAuthCode(session.userId, code, redirectUri)
     } catch (error) {

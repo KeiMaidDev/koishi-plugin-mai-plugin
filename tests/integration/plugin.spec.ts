@@ -139,6 +139,10 @@ describe('maimai plugin lifecycle', () => {
     expect(resolve(developerTokens.divingFish).meta?.role).toBe('secret')
     expect(resolve(developerTokens.lxns).meta?.role).toBe('secret')
     expect(resolve(oauth.clientSecret).meta?.role).toBe('secret')
+    expect(resolve(oauth.callbackPath).meta).toMatchObject({
+      default: '/mai-plugin/lxns/callback',
+      pattern: { source: expect.any(String) },
+    })
     expect(resolve(render.concurrency).meta).toMatchObject({ default: 4, min: 1, max: 16 })
     expect(resolve(render.queueLimit).meta).toMatchObject({ default: 64, min: 1 })
     expect(resolve(render.timeoutMs).meta).toMatchObject({ default: 30_000, min: 1_000 })

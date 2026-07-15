@@ -1,4 +1,8 @@
 import Schema from 'schemastery'
+import {
+  DEFAULT_LXNS_CALLBACK_PATH,
+  LXNS_CALLBACK_PATH_PATTERN,
+} from './server/lxns-callback'
 
 export interface Config {
   developerTokens: {
@@ -7,6 +11,7 @@ export interface Config {
   }
   oauth: {
     enabled: boolean
+    callbackPath?: string
     clientId: string
     clientSecret: string
     tokenCipherKey: string
@@ -39,6 +44,10 @@ export const ConfigSchema: Schema<Config> = Schema.object({
   oauth: Schema.object({
     enabled: Schema.boolean().default(false)
       .description('是否启用 LXNS OAuth 用户授权和成绩同步。'),
+    callbackPath: Schema.string()
+      .pattern(LXNS_CALLBACK_PATH_PATTERN)
+      .default(DEFAULT_LXNS_CALLBACK_PATH)
+      .description('LXNS OAuth 回调路径。完整地址为“publicBaseUrl 或 Koishi Server selfUrl”加上此路径。'),
     clientId: secret().description('LXNS OAuth 客户端 ID。'),
     clientSecret: secret().description('LXNS OAuth 客户端密钥。'),
     tokenCipherKey: secret()

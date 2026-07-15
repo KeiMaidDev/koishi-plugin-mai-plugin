@@ -1,5 +1,6 @@
 import type { Context } from 'koishi'
 import { CallbackTokenError } from './callback-store'
+import { resolveLxnsCallbackPath } from './lxns-callback'
 import { createProxyConfig, type ProxyEndpoint } from './proxy-config'
 
 export interface MaiRouteService {
@@ -12,6 +13,7 @@ export interface MaiServerRouteOptions {
   service: MaiRouteService
   proxy: ProxyEndpoint
   allowedWahlapHost?: string
+  lxnsCallbackPath?: string
 }
 
 interface RouteContext {
@@ -86,8 +88,9 @@ export function registerMaiServerRoutes(
   const router = (ctx as Context & { server: ServerRouter }).server
   const previousLayers = new Set(router.stack)
   const allowedWahlapHost = (options.allowedWahlapHost ?? 'tgk-wcaime.wahlap.com').toLocaleLowerCase()
+  const lxnsCallbackPath = resolveLxnsCallbackPath(options.lxnsCallbackPath)
 
-  router.all('/mai-plugin/lxns/callback', async (routeContext: unknown) => {
+  router.all(lxnsCallbackPath, async (routeContext: unknown) => {
     const route = routeContext as unknown as RouteContext
     if (!allowGet(route)) return
     const state = queryValue(route.query.state, 128)

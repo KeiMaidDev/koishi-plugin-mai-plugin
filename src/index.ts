@@ -30,6 +30,8 @@ import { QueueService } from './services/queue-service'
 import { SettingService } from './services/setting-service'
 import {
   createKoishiWahlapRequester,
+  lxnsCallbackUrl,
+  PublicCallbackUnavailableError,
   UpdateFlowError,
   UpdateService,
   WahlapRecordFetcher,
@@ -67,6 +69,7 @@ export * from './services/queue-service'
 export * from './services/setting-service'
 export * from './services/update-service'
 export * from './server/callback-store'
+export * from './server/lxns-callback'
 export * from './server/proxy-config'
 export * from './server/routes'
 export * from './commands/calc'
@@ -368,7 +371,20 @@ export function createDefaultLifecycle(
         service: commandDependencies.updateService,
         proxy: endpoint.proxy,
         allowedWahlapHost: endpoint.allowedHost,
+        lxnsCallbackPath: runtime.config.oauth.callbackPath,
       })
+      if (runtime.config.oauth.enabled) {
+        const logger = ctx.logger(PLUGIN_NAME)
+        try {
+          logger.info(`LXNS OAuth 回调地址：${lxnsCallbackUrl(
+            runtime.publicBaseUrl,
+            runtime.config.oauth.callbackPath,
+          )}`)
+        } catch (error) {
+          if (!(error instanceof PublicCallbackUnavailableError)) throw error
+          logger.warn('LXNS OAuth 已启用，但未配置 publicBaseUrl 或 Koishi Server selfUrl。')
+        }
+      }
     },
     async initializeCommands(runtime) {
       if (state.commandRegistration) return

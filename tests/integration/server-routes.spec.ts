@@ -1,7 +1,7 @@
 import server from '@koishijs/plugin-server'
 import mock from '@koishijs/plugin-mock'
 import memory from '@koishijs/plugin-database-memory'
-import { Context, Universal } from '@koishijs/core'
+import { Context, Logger, Universal } from '@koishijs/core'
 import { request } from 'node:http'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ProviderOAuthRequiredError } from '../../src/providers/errors'
@@ -11,10 +11,12 @@ import {
   CommandCallbackRouter,
   createDefaultLifecycle,
   createProxyConfig,
+  DEFAULT_LXNS_CALLBACK_PATH,
   PublicCallbackUnavailableError,
   registerCoreCommands,
   registerUpdateCommands,
   replyQueryError,
+  resolveLxnsCallbackPath,
   resolveCompatibilityExecution,
   registerMaiServerRoutes,
   UpdateBindingRequiredError,
@@ -65,6 +67,25 @@ describe('callback store', () => {
     } catch (error) {
       expect(error).toMatchObject({ code: 'unknown-token' })
     }
+  })
+})
+
+describe('LXNS callback path', () => {
+  it('uses the legacy default and accepts static custom paths', () => {
+    expect(resolveLxnsCallbackPath()).toBe(DEFAULT_LXNS_CALLBACK_PATH)
+    expect(resolveLxnsCallbackPath('/lxns/callback')).toBe('/lxns/callback')
+  })
+
+  it.each([
+    '',
+    'lxns/callback',
+    '/lxns//callback',
+    '/lxns/../callback',
+    '/lxns/callback?source=x',
+    '/lxns/:provider',
+  ])('rejects unsafe callback path %j', (path) => {
+    expect(() => resolveLxnsCallbackPath(path))
+      .toThrow('Invalid LXNS OAuth callback path')
   })
 })
 
@@ -167,6 +188,24 @@ describe('update service', () => {
     await expect(service.completeLxnsOAuth(state, 'reused')).rejects.toMatchObject({
       code: 'unknown-token',
     })
+    service.dispose()
+  })
+
+  it('uses the configured callback path for authorization and token exchange', async () => {
+    const deps = dependencies({
+      oauth: { enabled: true, clientId: 'client-id', callbackPath: '/lxns/callback' },
+    })
+    const currentSession = session()
+    const service = new UpdateService(deps)
+    const authorization = new URL(await service.beginLxnsOAuth(currentSession))
+
+    expect(authorization.searchParams.get('redirect_uri')).toBe('https://bot.example/lxns/callback')
+    await service.completeLxnsOAuth(authorization.searchParams.get('state')!, 'grant-code')
+    expect(deps.lxns.exchangeOAuthCode).toHaveBeenCalledWith(
+      'user-1',
+      'grant-code',
+      'https://bot.example/lxns/callback',
+    )
     service.dispose()
   })
 
@@ -559,7 +598,13 @@ describe('default update lifecycle', () => {
       publicBaseUrl: 'https://bot.example:8443',
       config: {
         developerTokens: { divingFish: '', lxns: '' },
-        oauth: { enabled: true, clientId: 'id', clientSecret: 'secret', tokenCipherKey: 'cipher' },
+        oauth: {
+          enabled: true,
+          callbackPath: '/lxns/callback',
+          clientId: 'id',
+          clientSecret: 'secret',
+          tokenCipherKey: 'cipher',
+        },
         resourceSync: {
           enabled: false,
           intervalMinutes: 60,
@@ -574,13 +619,20 @@ describe('default update lifecycle', () => {
         compatibilityMode: false,
       },
     }
+    const previousLogTargets = Logger.targets
+    const logRecords: Logger.Record[] = []
+    Logger.targets = [{ record: record => logRecords.push(record) }]
 
     try {
       await lifecycle.initializeDataCache(runtime)
       await lifecycle.initializeServices(runtime)
       expect(createCommandDependencies).toHaveBeenCalledTimes(1)
       await lifecycle.initializeRoutes(runtime)
-      expect(app.server.stack.some(layer => layer.path === '/mai-plugin/lxns/callback')).toBe(true)
+      expect(app.server.stack.some(layer => layer.path === '/lxns/callback')).toBe(true)
+      expect(logRecords).toContainEqual(expect.objectContaining({
+        type: 'info',
+        content: expect.stringContaining('https://bot.example:8443/lxns/callback'),
+      }))
       await lifecycle.initializeCommands(runtime)
       expect(createCommandDependencies).toHaveBeenCalledTimes(1)
       expect(app.$commander.get('mai.update')).toBeDefined()
@@ -588,8 +640,32 @@ describe('default update lifecycle', () => {
       await lifecycle.releaseCallbackState()
       expect(updateService.dispose).toHaveBeenCalledTimes(1)
       expect(app.$commander.get('mai.update')).toBeUndefined()
-      expect(app.server.stack.some(layer => layer.path === '/mai-plugin/lxns/callback')).toBe(false)
+      expect(app.server.stack.some(layer => layer.path === '/lxns/callback')).toBe(false)
+
+      const unavailableLifecycle = createDefaultLifecycle(app, {
+        createCommandDependencies,
+        createDataSync: vi.fn(() => ({}) as never),
+      })
+      const unavailableRuntime = {
+        ...runtime,
+        publicBaseUrl: '',
+        config: { ...runtime.config, publicBaseUrl: '' },
+      }
+      await unavailableLifecycle.initializeDataCache(unavailableRuntime)
+      await unavailableLifecycle.initializeServices(unavailableRuntime)
+      await unavailableLifecycle.initializeRoutes(unavailableRuntime)
+      expect(logRecords).toContainEqual(expect.objectContaining({
+        type: 'warn',
+        content: expect.stringMatching(/publicBaseUrl|selfUrl/),
+      }))
+
+      const logs = logRecords.map(record => record.content).join('\n')
+      expect(logs).not.toContain('secret')
+      expect(logs).not.toContain('cipher')
+      expect(logs).not.toMatch(/(?:code|state|token)=/iu)
+      await unavailableLifecycle.releaseCallbackState()
     } finally {
+      Logger.targets = previousLogTargets
       await app.stop()
     }
   })
@@ -643,6 +719,22 @@ describe('maimai server routes', () => {
     expect(response.status).toBe(200)
     expect(await response.text()).toContain('绑定成功')
     expect(completeLxnsOAuth).toHaveBeenCalledWith('opaque', 'grant')
+  })
+
+  it('registers only a configured custom LXNS callback path', async () => {
+    registration.dispose()
+    registration = registerMaiServerRoutes(app, {
+      service: {
+        completeLxnsOAuth,
+        createUpdateRedirect,
+        completeDivingFishUpdate,
+      },
+      proxy: { server: 'proxy.example', port: 8080 },
+      lxnsCallbackPath: '/lxns/callback',
+    })
+
+    expect((await fetch(`${baseUrl}/mai-plugin/lxns/callback?state=a&code=b`)).status).toBe(404)
+    expect((await fetch(`${baseUrl}/lxns/callback?state=a&code=b`)).status).toBe(200)
   })
 
   it('validates update tokens and redirects only through the service', async () => {

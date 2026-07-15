@@ -52,7 +52,6 @@ export function registerHelpCommand(
             command: '/mai 设置查分器',
             enter: false,
             reply: true,
-            userId: session.userId,
           },
           {
             id: 'help-guess',

@@ -1363,6 +1363,10 @@ describe('core maimai commands', () => {
       'help-bind',
     ]))
     expect(helpButtons.every(button => button.action.type === 2)).toBe(true)
+    expect(helpButtons.find(button => button.id === 'help-provider')?.action.permission)
+      .toEqual({ type: 2 })
+    expect(helpButtons.find(button => button.id === 'help-bind')?.action.permission)
+      .toEqual({ type: 0, specify_user_ids: ['10001'] })
     dependencies.settingService.isCompatibilityMode.mockResolvedValue(true)
     await client.shouldReply('/mai', /https:\/\/otmdb\.cn\/bot\/maimai/)
   })

@@ -5,7 +5,7 @@ These PNGs are deterministic geometric assets authored by this project. They con
 Regenerate them explicitly with:
 
 ```text
-npm run generate:render-assets
+yarn workspace koishi-plugin-mai-plugin generate:render-assets
 ```
 
 The Kotlin source was inspected for missing Shinobu names. Functional mappings are:

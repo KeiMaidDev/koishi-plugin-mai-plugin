@@ -5,14 +5,14 @@ Template tests compare exact RGBA pixels and allow at most `0.5%` changed pixels
 Generate a platform baseline explicitly:
 
 ```text
-npm run generate:render-baselines -- --platform windows
-npm run generate:render-baselines -- --platform linux
+yarn workspace koishi-plugin-mai-plugin generate:render-baselines -- --platform windows
+yarn workspace koishi-plugin-mai-plugin generate:render-baselines -- --platform linux
 ```
 
 The initial `*.windows.png` files were rendered on Windows with bundled Noto Sans SC fonts and the local Takumi native package. The initial `*.linux.png` files were seeded byte-identically with:
 
 ```text
-npm run seed:linux-render-baselines
+yarn workspace koishi-plugin-mai-plugin seed:linux-render-baselines
 ```
 
 That seed command does not execute a Linux renderer and prints that fact. Regenerate `*.linux.png` on Linux before treating them as Linux execution evidence.

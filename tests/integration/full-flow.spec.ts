@@ -163,7 +163,11 @@ describe('end-to-end compatibility flows', () => {
     client.event.guild = { id: 'flow-guild' } as never
     const sendMessage = vi.spyOn(client.bot, 'sendMessage')
 
-    await client.shouldReply('/mai b50', /绑定您的QQ号/)
+    await client.receive('/mai b50')
+    const bindingElement = sendMessage.mock.calls.flatMap(call => call[1] as any[])
+      .find(element => element.type === 'qq:rawmarkdown')
+    expect(bindingElement.attrs.markdown.content).toContain('绑定您的 QQ 号')
+    expect(bindingElement.attrs.keyboard.content.rows[0].buttons[0].id).toBe('bind-qq')
     await client.receive('/mai bind 12345678')
     await vi.waitFor(() => expect(renderRating).toHaveBeenCalledTimes(1))
 
@@ -173,7 +177,7 @@ describe('end-to-end compatibility flows', () => {
     expect(renderRating).toHaveBeenCalledWith(expect.objectContaining({ backend: 'LXNS' }))
     const output = JSON.stringify(sendMessage.mock.calls)
     expect(output).toContain('"type":"img"')
-    expect(output).toContain('qq:rawmarkdown-without-keyboard')
+    expect(output).toContain('qq:rawmarkdown')
   })
 
   it('persists encrypted LXNS OAuth tokens and replays the pending command after callback', async () => {
@@ -194,8 +198,16 @@ describe('end-to-end compatibility flows', () => {
     })
     const service = new plugin.UpdateService({
       publicBaseUrl: 'https://bot.example',
-      oauth: { enabled: true, clientId: 'client-id' },
-      lxns: { exchangeOAuthCode },
+      oauth: {
+        enabled: true,
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+        tokenCipherKey: 'oauth-flow-cipher',
+      },
+      lxns: {
+        exchangeOAuthCode,
+        removeOAuthToken: userId => repositories.oauth.remove(userId, 'lxns'),
+      },
       bind: repositories.bind,
       fetchAuthorizationRedirect: vi.fn(),
       fetchDivingFishRecords: vi.fn(),
@@ -224,6 +236,10 @@ describe('end-to-end compatibility flows', () => {
     expect(raw.refreshToken).not.toContain('refresh-secret')
     expect(send).toHaveBeenCalledWith('落雪授权绑定成功。')
     expect(replay).toHaveBeenCalledWith('mai.rating B50')
+
+    await service.unbindLxns('oauth-user')
+    await service.unbindLxns('oauth-user')
+    expect(await repositories.oauth.get('oauth-user')).toBeNull()
   })
 
   it('runs the Diving Fish authorization redirect through the Host callback and reports import completion', async () => {

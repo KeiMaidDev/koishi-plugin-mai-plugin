@@ -92,6 +92,17 @@ export class CallbackStore<T> {
     this.entries.clear()
   }
 
+  deleteWhere(predicate: (value: T) => boolean) {
+    this.sweep()
+    let removed = 0
+    for (const [token, entry] of this.entries) {
+      if (!predicate(entry.value)) continue
+      this.entries.delete(token)
+      removed += 1
+    }
+    return removed
+  }
+
   dispose() {
     if (this.disposed) return
     this.disposed = true

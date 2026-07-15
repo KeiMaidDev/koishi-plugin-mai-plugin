@@ -18,7 +18,10 @@ const WAHLAP_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit
 
 export class PublicCallbackUnavailableError extends Error {
   constructor() {
-    super('未配置公网回调地址，请设置 publicBaseUrl 或 Koishi Server selfUrl。')
+    super(
+      '未完成授权配置，请检查 oauth.enabled、clientId、clientSecret、tokenCipherKey，'
+      + '并设置 publicBaseUrl 或 Koishi Server selfUrl。',
+    )
     this.name = 'PublicCallbackUnavailableError'
   }
 }
@@ -43,7 +46,7 @@ export interface UpdateSessionLocator {
   channelId: string
   direct: boolean
   pendingCommand?: string
-  send(text: string): Promise<void>
+  send(text: string, options?: { retryCommand?: string }): Promise<void>
   replay(command: string): Promise<void>
 }
 
@@ -56,9 +59,12 @@ export interface UpdateServiceOptions {
     enabled: boolean
     callbackPath?: string
     clientId: string
+    clientSecret: string
+    tokenCipherKey: string
   }
   lxns: {
     exchangeOAuthCode(userId: string, code: string, redirectUri: string): Promise<unknown>
+    removeOAuthToken(userId: string): Promise<void>
   }
   bind: {
     getImportToken(userId: string): Promise<string | null>
@@ -315,7 +321,12 @@ export class UpdateService {
 
   async beginLxnsOAuth(session: UpdateSessionLocator) {
     this.assertActive()
-    if (!this.options.oauth.enabled || !this.options.oauth.clientId) {
+    if (
+      !this.options.oauth.enabled
+      || !this.options.oauth.clientId.trim()
+      || !this.options.oauth.clientSecret.trim()
+      || !this.options.oauth.tokenCipherKey.trim()
+    ) {
       throw new PublicCallbackUnavailableError()
     }
     const redirectUri = lxnsCallbackUrl(
@@ -331,6 +342,12 @@ export class UpdateService {
     return authorize.href
   }
 
+  async unbindLxns(userId: string) {
+    this.assertActive()
+    this.lxnsStates.deleteWhere(session => session.userId === userId)
+    await this.options.lxns.removeOAuthToken(userId)
+  }
+
   async completeLxnsOAuth(state: string, code: string) {
     this.assertActive()
     const session = this.lxnsStates.consume(state)
@@ -341,7 +358,10 @@ export class UpdateService {
     try {
       await this.options.lxns.exchangeOAuthCode(session.userId, code, redirectUri)
     } catch (error) {
-      await session.send('落雪授权绑定失败，请重试。')
+      await session.send(
+        '落雪授权绑定失败，请重试。',
+        { retryCommand: '/mai 绑定落雪' },
+      )
       throw error
     }
     await session.send('落雪授权绑定成功。')

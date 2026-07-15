@@ -9,6 +9,7 @@ import {
   createQqCommandAction,
   createQqKeyboard,
   createQqNativeMarkdown,
+  createQqUrlAction,
   createQqUserPermission,
 } from '../platform/qq-message'
 import { sendReply } from '../platform/qq-message'
@@ -75,6 +76,7 @@ export interface CoreCommandDependencies {
     UpdateService,
     | 'beginDivingFishUpdate'
     | 'beginLxnsOAuth'
+    | 'unbindLxns'
     | 'bindDivingFishToken'
     | 'completeLxnsOAuth'
     | 'createUpdateRedirect'
@@ -110,6 +112,16 @@ export interface QqCommandGuidanceButton {
   unsupportTips?: string
 }
 
+export interface QqUrlGuidanceButton {
+  id: string
+  label: string
+  url: string
+  userId: string
+  visitedLabel?: string
+  style?: 0 | 1
+  unsupportTips?: string
+}
+
 export function createQqCommandGuidance(
   content: string,
   rows: readonly (readonly QqCommandGuidanceButton[])[],
@@ -130,6 +142,21 @@ export function createQqCommandGuidance(
       button.visitedLabel,
     )))
   ))))
+}
+
+export function createQqUrlGuidance(content: string, button: QqUrlGuidanceButton) {
+  return createQqNativeMarkdown(content, createQqKeyboard([createQqButtonRow([
+    createQqButton(
+      button.id,
+      button.label,
+      createQqUrlAction(button.url, {
+        permission: createQqUserPermission(button.userId),
+        unsupportTips: button.unsupportTips,
+      }),
+      button.style,
+      button.visitedLabel,
+    ),
+  ])]))
 }
 
 export type CoreCommandContext = Pick<Context, 'command'>
@@ -197,7 +224,21 @@ export async function replyQueryError(
         channelId: session.channelId,
         direct: session.isDirect,
         pendingCommand: session.content,
-        send: text => replyText(session, dependencies, text),
+        send: (text, options) => replyText(
+          session,
+          dependencies,
+          text,
+          options?.retryCommand
+            ? createQqCommandGuidance(text, [[{
+                id: 'retry-lxns-oauth',
+                label: '重试授权',
+                command: options.retryCommand,
+                enter: true,
+                reply: true,
+                userId: session.userId,
+              }]])
+            : undefined,
+        ),
         replay: async (command) => {
           if (dependencies.replayCommand) {
             await dependencies.replayCommand(session, command)
@@ -206,18 +247,46 @@ export async function replyQueryError(
           }
         },
       })
+      const text = `使用该功能需要授权 BOT 访问您在落雪查分器的全部成绩。无法使用按钮时，请复制以下 HTTPS 链接打开：\n${url}`
       await replyText(
         session,
         dependencies,
-        `使用该功能需要授权 BOT 访问您在落雪查分器的全部成绩：\n${url}`,
+        text,
+        createQqUrlGuidance(text, {
+          id: 'lxns-oauth',
+          label: '前往落雪授权',
+          visitedLabel: '重新前往落雪授权',
+          url,
+          userId: session.userId,
+        }),
       )
       return
     } catch (oauthError) {
       if (oauthError instanceof PublicCallbackUnavailableError) {
-        await replyText(session, dependencies, oauthError.message)
+        await replyText(
+          session,
+          dependencies,
+          oauthError.message,
+          createQqCommandGuidance(oauthError.message, [[{
+            id: 'oauth-help',
+            label: '返回帮助',
+            command: '/mai',
+            enter: true,
+            reply: true,
+            userId: session.userId,
+          }]]),
+        )
         return
       }
-      await replyText(session, dependencies, '落雪授权请求失败，请稍后重试。')
+      const text = '落雪授权请求失败，请稍后重试。'
+      await replyText(session, dependencies, text, createQqCommandGuidance(text, [[{
+        id: 'retry-lxns-oauth',
+        label: '重试授权',
+        command: '/mai 绑定落雪',
+        enter: true,
+        reply: true,
+        userId: session.userId,
+      }]]))
       return
     }
   }

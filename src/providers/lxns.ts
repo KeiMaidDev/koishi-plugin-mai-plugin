@@ -391,6 +391,10 @@ export class LxnsProvider implements MaimaiProvider {
     return token.access_token
   }
 
+  async removeOAuthToken(userId: string) {
+    await this.repositories.oauth.remove(userId, 'lxns')
+  }
+
   private async refreshStoredToken(
     userId: string,
     stored: { refreshToken: string },

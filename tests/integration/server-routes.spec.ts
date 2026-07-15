@@ -68,6 +68,20 @@ describe('callback store', () => {
       expect(error).toMatchObject({ code: 'unknown-token' })
     }
   })
+
+  it('deletes only callback values matching a user predicate', () => {
+    let seed = 0
+    const store = new CallbackStore<{ userId: string }>({
+      randomBytes: () => Buffer.alloc(32, ++seed),
+    })
+    const first = store.issue({ userId: 'user-1' })
+    const second = store.issue({ userId: 'user-2' })
+
+    expect(store.deleteWhere(value => value.userId === 'user-1')).toBe(1)
+    expect(() => store.consume(first)).toThrowError(CallbackTokenError)
+    expect(store.consume(second)).toEqual({ userId: 'user-2' })
+    store.dispose()
+  })
 })
 
 describe('LXNS callback path', () => {
@@ -117,10 +131,10 @@ describe('proxy configuration', () => {
 })
 
 describe('update service', () => {
-  function session() {
+  function session(userId = 'user-1') {
     return {
-      userId: 'user-1',
-      platform: 'mock',
+      userId,
+      platform: 'qq',
       channelId: 'channel-1',
       direct: false,
       pendingCommand: 'mai.rating B50',
@@ -132,8 +146,16 @@ describe('update service', () => {
   function dependencies(overrides: Record<string, unknown> = {}) {
     return {
       publicBaseUrl: 'https://bot.example',
-      oauth: { enabled: true, clientId: 'client-id' },
-      lxns: { exchangeOAuthCode: vi.fn(async () => undefined) },
+      oauth: {
+        enabled: true,
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+        tokenCipherKey: 'cipher-key',
+      },
+      lxns: {
+        exchangeOAuthCode: vi.fn(async () => undefined),
+        removeOAuthToken: vi.fn(async () => undefined),
+      },
       bind: {
         getImportToken: vi.fn(async () => 'import-secret'),
         setImportToken: vi.fn(async () => undefined),
@@ -161,6 +183,21 @@ describe('update service', () => {
 
     await expect(service.beginLxnsOAuth(session())).rejects.toBeInstanceOf(PublicCallbackUnavailableError)
     await expect(service.beginDivingFishUpdate(session())).rejects.toBeInstanceOf(PublicCallbackUnavailableError)
+    service.dispose()
+  })
+
+  it.each([
+    { enabled: false, clientId: 'client-id', clientSecret: 'secret', tokenCipherKey: 'key' },
+    { enabled: true, clientId: '', clientSecret: 'secret', tokenCipherKey: 'key' },
+    { enabled: true, clientId: 'client-id', clientSecret: '', tokenCipherKey: 'key' },
+    { enabled: true, clientId: 'client-id', clientSecret: 'secret', tokenCipherKey: '' },
+  ])('rejects incomplete OAuth configuration %#', async (oauth) => {
+    const service = new UpdateService(dependencies({ oauth }))
+
+    await expect(service.beginLxnsOAuth(session()))
+      .rejects.toBeInstanceOf(PublicCallbackUnavailableError)
+    await expect(service.beginLxnsOAuth(session()))
+      .rejects.toThrow(/oauth\.enabled.*clientId.*clientSecret.*tokenCipherKey/)
     service.dispose()
   })
 
@@ -193,7 +230,13 @@ describe('update service', () => {
 
   it('uses the configured callback path for authorization and token exchange', async () => {
     const deps = dependencies({
-      oauth: { enabled: true, clientId: 'client-id', callbackPath: '/lxns/callback' },
+      oauth: {
+        enabled: true,
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+        tokenCipherKey: 'cipher-key',
+        callbackPath: '/lxns/callback',
+      },
     })
     const currentSession = session()
     const service = new UpdateService(deps)
@@ -209,6 +252,29 @@ describe('update service', () => {
     service.dispose()
   })
 
+  it('unbinds only the current user token and unfinished OAuth states', async () => {
+    const deps = dependencies()
+    const service = new UpdateService(deps)
+    const firstState = new URL(await service.beginLxnsOAuth(session('user-1')))
+      .searchParams.get('state')!
+    const secondState = new URL(await service.beginLxnsOAuth(session('user-2')))
+      .searchParams.get('state')!
+
+    await service.unbindLxns('user-1')
+
+    expect(deps.lxns.removeOAuthToken).toHaveBeenCalledWith('user-1')
+    await expect(service.completeLxnsOAuth(firstState, 'first-code')).rejects.toMatchObject({
+      code: 'unknown-token',
+    })
+    await expect(service.completeLxnsOAuth(secondState, 'second-code')).resolves.toBeUndefined()
+    expect(deps.lxns.exchangeOAuthCode).toHaveBeenCalledWith(
+      'user-2',
+      'second-code',
+      'https://bot.example/mai-plugin/lxns/callback',
+    )
+    service.dispose()
+  })
+
   it('does not restore a consumed LXNS state when token exchange fails', async () => {
     const deps = dependencies({
       lxns: { exchangeOAuthCode: vi.fn(async () => { throw new Error('exchange failed') }) },
@@ -218,7 +284,10 @@ describe('update service', () => {
     const state = new URL(await service.beginLxnsOAuth(currentSession)).searchParams.get('state')!
 
     await expect(service.completeLxnsOAuth(state, 'bad-code')).rejects.toThrow('exchange failed')
-    expect(currentSession.send).toHaveBeenCalledWith('落雪授权绑定失败，请重试。')
+    expect(currentSession.send).toHaveBeenCalledWith(
+      '落雪授权绑定失败，请重试。',
+      { retryCommand: '/mai 绑定落雪' },
+    )
     await expect(service.completeLxnsOAuth(state, 'second-code')).rejects.toMatchObject({
       code: 'unknown-token',
     })
@@ -385,6 +454,7 @@ describe('update commands', () => {
       beginDivingFishUpdate: vi.fn(async () => 'https://bot.example/mai-plugin/update?token=opaque'),
       bindDivingFishToken: vi.fn(async () => undefined),
       beginLxnsOAuth: vi.fn(async () => 'https://maimai.lxns.net/api/v0/oauth/authorize?state=opaque'),
+      unbindLxns: vi.fn(async () => undefined),
       ...overrides,
     }
     const commands = registerUpdateCommands(app, {
@@ -411,6 +481,74 @@ describe('update commands', () => {
         channelId: 'channel-1',
       })
       await client.shouldNotReply('/mai 更新额外文本')
+    } finally {
+      for (const command of commands) command.dispose()
+    }
+  })
+
+  it('binds and unbinds LXNS explicitly with a user-only HTTPS button on QQ', async () => {
+    const { client, commands, updateService } = await commandApp()
+    client.event.platform = 'qq'
+    const sendMessage = vi.spyOn(client.bot, 'sendMessage')
+    try {
+      await client.receive('/mai 绑定落雪')
+      const element = sendMessage.mock.calls.flatMap(call => call[1] as any[])
+        .find(item => item.type === 'qq:rawmarkdown')
+      expect(element).toBeDefined()
+      expect(element.attrs.markdown.content).toContain('https://maimai.lxns.net')
+      const [button] = element.attrs.keyboard.content.rows[0].buttons
+      expect(button).toMatchObject({
+        id: 'lxns-oauth',
+        action: {
+          type: 0,
+          permission: { type: 0, specify_user_ids: ['user-1'] },
+          data: 'https://maimai.lxns.net/api/v0/oauth/authorize?state=opaque',
+        },
+      })
+      expect(updateService.beginLxnsOAuth).toHaveBeenCalledWith(expect.objectContaining({
+        userId: 'user-1',
+        pendingCommand: '',
+      }))
+
+      sendMessage.mockClear()
+      await client.receive('/mai 解绑落雪')
+      const unbindElement = sendMessage.mock.calls.flatMap(call => call[1] as any[])
+        .find(item => item.type === 'qq:rawmarkdown')
+      expect(unbindElement.attrs.markdown.content).toContain('解绑成功')
+      await client.receive('/mai unbind-lxns')
+      expect(updateService.unbindLxns).toHaveBeenCalledTimes(2)
+      expect(updateService.unbindLxns).toHaveBeenCalledWith('user-1')
+    } finally {
+      for (const command of commands) command.dispose()
+    }
+  })
+
+  it('returns the LXNS authorization URL as text outside QQ', async () => {
+    const { client, commands } = await commandApp()
+    try {
+      const output = (await client.receive('/mai bind-lxns')).join('\n')
+      expect(output).toContain('https://maimai.lxns.net/api/v0/oauth/authorize?state=opaque')
+      expect(output).not.toContain('<qq:')
+    } finally {
+      for (const command of commands) command.dispose()
+    }
+  })
+
+  it('returns help instead of retrying when LXNS OAuth is not configured', async () => {
+    const { client, commands } = await commandApp({
+      beginLxnsOAuth: vi.fn(async () => { throw new PublicCallbackUnavailableError() }),
+    })
+    client.event.platform = 'qq'
+    const sendMessage = vi.spyOn(client.bot, 'sendMessage')
+    try {
+      await client.receive('/mai 绑定落雪')
+      const element = sendMessage.mock.calls.flatMap(call => call[1] as any[])
+        .find(item => item.type === 'qq:rawmarkdown')
+      const [button] = element.attrs.keyboard.content.rows[0].buttons
+      expect(button).toMatchObject({
+        id: 'update-help',
+        action: { type: 2, data: '/mai' },
+      })
     } finally {
       for (const command of commands) command.dispose()
     }
@@ -481,6 +619,7 @@ describe('core update integration', () => {
         beginDivingFishUpdate: vi.fn(),
         bindDivingFishToken: vi.fn(),
         beginLxnsOAuth: vi.fn(),
+        unbindLxns: vi.fn(),
       },
     }
   }
@@ -489,6 +628,8 @@ describe('core update integration', () => {
     expect(resolveCompatibilityExecution('更新')).toBe('mai.update')
     expect(resolveCompatibilityExecution('导')).toBe('mai.update')
     expect(resolveCompatibilityExecution('绑定水鱼 token')).toBe('mai.bind-diving-fish token')
+    expect(resolveCompatibilityExecution('绑定落雪')).toBe('mai.bind-lxns')
+    expect(resolveCompatibilityExecution('解绑落雪')).toBe('mai.unbind-lxns')
     expect(resolveCompatibilityExecution('更新额外文本')).toBeNull()
   })
 
@@ -498,9 +639,13 @@ describe('core update integration', () => {
 
     expect(app.$commander.get('mai.update')).toBeDefined()
     expect(app.$commander.get('mai.bind-diving-fish')).toBeDefined()
+    expect(app.$commander.get('mai.bind-lxns')).toBeDefined()
+    expect(app.$commander.get('mai.unbind-lxns')).toBeDefined()
     await registration.dispose()
     expect(app.$commander.get('mai.update')).toBeUndefined()
     expect(app.$commander.get('mai.bind-diving-fish')).toBeUndefined()
+    expect(app.$commander.get('mai.bind-lxns')).toBeUndefined()
+    expect(app.$commander.get('mai.unbind-lxns')).toBeUndefined()
   })
 
   it('starts LXNS OAuth only for self queries and preserves the pending command', async () => {
@@ -510,7 +655,7 @@ describe('core update integration', () => {
     const session = {
       userId: 'user-1',
       channelId: 'channel-1',
-      platform: 'mock',
+      platform: 'qq',
       content: 'mai.rating B50',
       isDirect: false,
       send,
@@ -522,6 +667,7 @@ describe('core update integration', () => {
         beginLxnsOAuth,
         beginDivingFishUpdate: vi.fn(),
         bindDivingFishToken: vi.fn(),
+        unbindLxns: vi.fn(),
       },
     } as never
 
@@ -533,11 +679,23 @@ describe('core update integration', () => {
     )
     expect(beginLxnsOAuth).toHaveBeenCalledWith(expect.objectContaining({
       userId: 'user-1',
-      platform: 'mock',
+      platform: 'qq',
       channelId: 'channel-1',
       pendingCommand: 'mai.rating B50',
     }))
     expect(send).toHaveBeenCalled()
+    const oauthElement = send.mock.calls.flatMap(call => {
+      const content = call[0]
+      return Array.isArray(content) ? content : [content]
+    }).find(element => element?.type === 'qq:rawmarkdown')
+    expect(oauthElement).toBeDefined()
+    expect(oauthElement.attrs.keyboard.content.rows[0].buttons[0]).toMatchObject({
+      id: 'lxns-oauth',
+      action: {
+        type: 0,
+        permission: { type: 0, specify_user_ids: ['user-1'] },
+      },
+    })
 
     beginLxnsOAuth.mockClear()
     await replyQueryError(

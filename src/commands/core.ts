@@ -50,6 +50,8 @@ const compatibilityPatterns = [
   /^(?:默认|设为默认)$/,
   /^(?:更新|导)$/,
   /^绑定水鱼(?:\s+.*)?$/,
+  /^绑定落雪$/,
+  /^解绑落雪$/,
 ] as const
 
 export function isExactCompatibilityCommand(content: string) {
@@ -99,6 +101,8 @@ export function resolveCompatibilityExecution(content: string) {
   if ((match = normalized.match(/^绑定水鱼(?:\s+(.*))?$/))) {
     return `mai.bind-diving-fish ${commandArgument(match[1] ?? '')}`
   }
+  if (/^绑定落雪$/.test(normalized)) return 'mai.bind-lxns'
+  if (/^解绑落雪$/.test(normalized)) return 'mai.unbind-lxns'
   if (/^(?:设置水鱼|水鱼)$/.test(normalized)) return 'mai.provider diving-fish'
   if (/^(?:设置落雪|落雪)$/.test(normalized)) return 'mai.provider lxns'
   if (/^(?:设置mai|设置b50)$/i.test(normalized)) return 'mai.settings'

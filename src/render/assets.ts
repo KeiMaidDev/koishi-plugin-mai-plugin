@@ -1,7 +1,6 @@
 import { readFile, stat } from 'node:fs/promises'
 import type { Stats } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 export interface RenderAssetFileSystem {
   readFile(path: string): Promise<Buffer>
@@ -14,8 +13,8 @@ const defaultFileSystem: RenderAssetFileSystem = {
 }
 
 export function resolvePackageAssetPath(relativePath: string) {
-  const moduleDirectory = dirname(fileURLToPath(import.meta.url))
-  const packageRoot = basename(moduleDirectory) === 'dist'
+  const moduleDirectory = __dirname
+  const packageRoot = ['dist', 'lib'].includes(basename(moduleDirectory))
     ? dirname(moduleDirectory)
     : resolve(moduleDirectory, '../..')
   return join(packageRoot, 'assets', relativePath)

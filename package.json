@@ -1,37 +1,31 @@
 {
   "name": "koishi-plugin-mai-plugin",
-  "description": "",
+  "description": "Koishi maimai DX query, rendering, OAuth binding, and guessing plugin.",
   "version": "0.0.1",
-  "type": "module",
-  "main": "dist/index.js",
+  "main": "lib/index.js",
   "typings": "lib/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./lib/index.d.ts",
-      "import": "./dist/index.js",
-      "default": "./dist/index.js"
-    },
-    "./package.json": "./package.json"
-  },
   "files": [
     "lib",
-    "dist",
     "assets/fallback",
     "assets/fonts",
     "assets/generated"
   ],
+  "homepage": "https://github.com/KeiMaidDev/koishi-plugin-mai-plugin#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/KeiMaidDev/koishi-plugin-mai-plugin.git"
+  },
+  "bugs": {
+    "url": "https://github.com/KeiMaidDev/koishi-plugin-mai-plugin/issues"
+  },
   "license": "MIT",
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "build": "npm run build:types && npm run build:js",
-    "build:types": "tsc -p tsconfig.json",
-    "build:js": "vite build",
     "generate:render-baselines": "node scripts/generate-render-baselines.mjs",
     "generate:render-assets": "node scripts/generate-render-assets.mjs",
     "compare:images": "vite-node --script scripts/compare-images.ts",
-    "prepack": "tsc -p tsconfig.json && vite build --logLevel error",
     "seed:linux-render-baselines": "node scripts/generate-render-baselines.mjs --seed-linux-from-windows",
     "test": "vitest run --testTimeout=15000",
     "test:integration": "vitest run tests/integration/plugin.spec.ts",
@@ -41,20 +35,32 @@
   "keywords": [
     "chatbot",
     "koishi",
-    "plugin"
+    "plugin",
+    "maimai"
   ],
+  "koishi": {
+    "description": {
+      "zh": "舞萌 DX 查分、图片渲染、落雪 OAuth 绑定与猜歌插件。"
+    },
+    "service": {
+      "required": [
+        "database",
+        "server"
+      ]
+    }
+  },
   "devDependencies": {
     "@koishijs/plugin-database-memory": "^3.7.0",
     "@koishijs/plugin-mock": "^2.6.6",
     "@koishijs/plugin-server": "^3.2.9",
     "@types/node": "^18.19.0",
     "typescript": "^5.8.3",
-    "vite": "6.4.3",
     "vite-node": "3.2.4",
     "vitest": "3.2.6"
   },
   "dependencies": {
     "@guswpm/damerau-levenshtein": "1.2.1",
+    "@satorijs/element": "^3.2.0",
     "@takumi-rs/core": "2.1.1",
     "@takumi-rs/helpers": "2.1.1",
     "cheerio": "1.0.0",

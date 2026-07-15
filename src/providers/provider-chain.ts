@@ -35,11 +35,11 @@ export interface ProviderChainOptions {
 
 const exceptionPriority = [
   ProviderPrivacyError,
+  ProviderBindingRequiredError,
   ProviderAuthorizationError,
   ProviderOAuthRequiredError,
   ProviderNoDataError,
   ProviderNotFoundError,
-  ProviderBindingRequiredError,
   ProviderUnsupportedError,
   ProviderMalformedPayloadError,
   ProviderTimeoutError,

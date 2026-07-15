@@ -20,6 +20,40 @@ const SETTINGS_HELP = [
   '兼容模式 [关闭]',
 ].join('\n')
 
+const PROVIDER_PROMPT = '请选择成绩查询使用的查分器。自动模式会依次尝试可用的查分器。'
+
+function providerLabel(provider: ProviderMode) {
+  if (provider === 'diving-fish') return '水鱼'
+  if (provider === 'lxns') return '落雪'
+  return '自动'
+}
+
+function providerSelectionGuidance(text: string) {
+  return createQqCommandGuidance(text, [[
+    {
+      id: 'provider-auto',
+      label: '自动',
+      command: '/mai 设置查分器 自动',
+      enter: true,
+      reply: true,
+    },
+    {
+      id: 'provider-diving-fish',
+      label: '水鱼',
+      command: '/mai 设置查分器 水鱼',
+      enter: true,
+      reply: true,
+    },
+    {
+      id: 'provider-lxns',
+      label: '落雪',
+      command: '/mai 设置查分器 落雪',
+      enter: true,
+      reply: true,
+    },
+  ]])
+}
+
 function pendingScope(session: ActiveCommandSession) {
   return {
     userId: session.userId,
@@ -96,12 +130,15 @@ export function registerSettingsCommands(
     .action(commandAction(async ({ session }, raw = '') => {
       const provider = providerMode(raw)
       if (!provider) {
-        await replyText(session, dependencies, '用法：设置查分器 <自动/水鱼/落雪>')
+        const text = raw.trim()
+          ? `不支持该查分器。${PROVIDER_PROMPT}`
+          : PROVIDER_PROMPT
+        await replyText(session, dependencies, text, providerSelectionGuidance(text))
         return
       }
       try {
         await dependencies.settingService.setProviderPreference(session.userId, provider)
-        await replyText(session, dependencies, '设置查分器成功。')
+        await replyText(session, dependencies, `已将查分器设置为“${providerLabel(provider)}”。`)
       } catch (error) {
         await settingFailure(session, dependencies, error)
       }

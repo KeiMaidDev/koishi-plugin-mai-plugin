@@ -254,17 +254,28 @@ export async function replyQueryError(
       return
     } catch (oauthError) {
       if (oauthError instanceof PublicCallbackUnavailableError) {
+        const text = `${oauthError.message}\n落雪当前无法完成绑定，请选择其他查分器或绑定水鱼。`
         await replyText(
           session,
           dependencies,
-          oauthError.message,
-          createQqCommandGuidance(oauthError.message, [[{
-            id: 'oauth-help',
-            label: '返回帮助',
-            command: '/mai',
-            enter: true,
-            reply: true,
-          }]]),
+          text,
+          createQqCommandGuidance(text, [[
+            {
+              id: 'oauth-provider',
+              label: '选择查分器',
+              command: '/mai 设置查分器',
+              enter: true,
+              reply: true,
+            },
+            {
+              id: 'oauth-bind-diving-fish',
+              label: '绑定水鱼',
+              command: '/mai 绑定水鱼',
+              enter: false,
+              reply: true,
+              unsupportTips: '请在正文命令后补充水鱼导入 Token 并手动发送。',
+            },
+          ]]),
         )
         return
       }

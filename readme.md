@@ -2,146 +2,222 @@
 
 [![npm](https://img.shields.io/npm/v/koishi-plugin-mai-plugin?style=flat-square)](https://www.npmjs.com/package/koishi-plugin-mai-plugin)
 
-Koishi 的舞萌 DX 查询、原生 Takumi 图片渲染、猜歌、排卡和成绩更新插件。运行时不依赖 Puppeteer、Playwright、Chromium 或其他浏览器渲染器。
+面向 Koishi 的舞萌 DX 查询插件，提供成绩查询、曲目检索、原生图片渲染、猜歌、排卡和成绩更新功能。
+
+插件使用 Takumi 原生渲染图片，运行时不依赖 Puppeteer、Playwright、Chromium 或其他浏览器渲染器。
+
+## 功能
+
+- 通过水鱼或落雪查分器查询 B15、B25、B35、B40、B50 和单曲成绩。
+- 生成成绩列表、定数表、完成表、进度表、未完成表和段位表。
+- 查询曲目、谱面、别名、BPM、谱师、曲师、版本和拟合定数。
+- 支持每日推荐、歌曲试听、经典猜歌和舞萌开字母。
+- 支持群聊机厅排卡、机厅别名和排卡人数管理。
+- 支持落雪 OAuth 绑定及水鱼成绩导入更新。
+- QQ 平台支持原生 Markdown 和按钮，其他平台可回退到普通文本与图片。
+
+## 安装
+
+在 Koishi 控制台的插件市场中搜索并安装：
+
+```text
+mai-plugin
+```
+
+插件包名：
+
+```text
+koishi-plugin-mai-plugin
+```
+
+安装后启用插件，并确认 Koishi 已启用数据库和 Server 服务。
 
 ## 运行要求
 
 - Node.js 18 或更高版本。
 - Koishi 4.18.7 或兼容版本。
-- Koishi `database` 与 `server` 服务。数据库驱动必须支持本插件注册的数据表和 `upsert`。
-- 可用的 Koishi HTTP 服务，用于访问水鱼、落雪和资源静态源。
-- `@takumi-rs/core` 与 `@takumi-rs/helpers` 的当前平台原生包。
-- QQ 原生 Markdown/按钮需要相应 QQ 适配器能力；其他平台和兼容模式会使用普通消息。
+- Koishi `database` 与 `server` 服务；数据库驱动需要支持插件注册的数据表和 `upsert`。
+- 可用的 Koishi HTTP 服务，用于访问水鱼、落雪和静态资源源。
+- 当前平台可用的 `@takumi-rs/core` 与 `@takumi-rs/helpers` 原生包。
+- QQ 原生 Markdown 和按钮需要适配器支持；不支持时可启用兼容模式。
 
-安装后，在 Koishi 控制台中启用 `mai-plugin`。需要 OAuth 或水鱼更新时，必须先正确配置 Server `selfUrl` 或本插件的 `publicBaseUrl`。
+需要使用落雪 OAuth 或水鱼成绩更新时，请先配置 Koishi Server 的 `selfUrl`，或设置插件的 `publicBaseUrl`。
 
-## 配置
+## 基础配置
 
-| 配置项 | 默认值 | 说明 |
-| --- | --- | --- |
-| `developerTokens.divingFish` | 空 | 水鱼开发者 Token。查询水鱼数据时需要。 |
-| `developerTokens.lxns` | 空 | 落雪开发者 Token。按服务端要求配置。 |
-| `oauth.enabled` | `false` | 是否启用落雪 OAuth 自动授权。 |
-| `oauth.clientId` | 空 | 落雪 OAuth Client ID。 |
-| `oauth.clientSecret` | 空 | 落雪 OAuth Client Secret。 |
-| `oauth.tokenCipherKey` | 空 | OAuth Token 的 AES-256-GCM 本地加密密钥。启用 OAuth 时必须设置稳定、高熵的值。 |
-| `oauth.callbackPath` | `/mai-plugin/lxns/callback` | 落雪 OAuth 回调路径。必须以 `/` 开头，不能包含查询参数或片段。 |
-| `resourceSync.enabled` | `true` | 是否同步曲目、封面、头像、姓名框和段位资源。 |
-| `resourceSync.intervalMinutes` | `60` | 同步周期，范围 1 到 1440 分钟。 |
-| `resourceSync.timeoutMs` | `10000` | 单次资源请求超时，范围 1000 到 120000 毫秒。 |
-| `resourceSync.cacheDir` | `data/maimai` | 资源快照、清单和预览音频目录。 |
-| `resourceSync.staticBaseUrl` | 空 | `manifest.json` 所在的 HTTP(S) 静态资源根地址；生产环境应使用 HTTPS。 |
-| `resourceSync.allowedHosts` | `[]` | 资源同步允许访问的主机白名单。 |
-| `render.concurrency` | `4` | Takumi 同时渲染数，范围 1 到 16。 |
-| `render.queueLimit` | `64` | 渲染等待队列上限，范围 1 到 1024。 |
-| `render.timeoutMs` | `30000` | 单次渲染超时，范围 1000 到 120000 毫秒。 |
-| `publicBaseUrl` | 空 | 公网 HTTP(S) 根地址；为空时使用 Koishi Server `selfUrl`。 |
-| `administrators` | `[]` | 可执行别名、猜歌和排卡管理操作的用户 ID。 |
-| `compatibilityMode` | `false` | 全局使用普通文本/图片回复，禁用 QQ 原生 Markdown 和按钮。 |
+插件市场安装后，在插件配置页填写所需配置。以下示例展示主要配置及默认值：
 
-`publicBaseUrl` 应是外部用户和第三方服务实际可访问的根地址，例如 `https://bot.example.com`。生产环境应使用 HTTPS，不要包含账号、密码、查询参数或片段。
+```yaml
+developerTokens:
+  divingFish: ""
+  lxns: ""
 
-## 数据目录
+oauth:
+  enabled: false
+  callbackPath: /mai-plugin/lxns/callback
+  clientId: ""
+  clientSecret: ""
+  tokenCipherKey: ""
 
-`resourceSync.cacheDir` 下包含：
+resourceSync:
+  enabled: true
+  intervalMinutes: 60
+  timeoutMs: 10000
+  cacheDir: data/maimai
+  staticBaseUrl: ""
+  allowedHosts: []
 
-- `manifest.json`：当前原子快照清单。
-- `snapshots/<revision>-<uuid>/`：校验完成的版本化资源快照。
-- `preview/<resourceId>.ogg`：可选的本地预览音频。
-- 临时 `.staging-*` 目录：同步期间使用，失败时清理。
+render:
+  concurrency: 4
+  queueLimit: 64
+  timeoutMs: 30000
 
-当前版本会保留成功快照。长期运行时应监控磁盘占用，并在确认 `manifest.json` 未引用旧快照后按运维策略清理。
+publicBaseUrl: ""
+administrators: []
+compatibilityMode: false
+```
 
-数据库保存 QQ 绑定、查分器设置、别名投票、排卡分组、猜歌状态、落雪 OAuth Token 和水鱼导入 Token。OAuth access/refresh Token 使用 `oauth.tokenCipherKey` 加密；水鱼导入 Token 仍属于数据库敏感数据，应依靠数据库权限、磁盘加密和备份访问控制保护。
+关键配置说明：
 
-## 回调与代理
+- `developerTokens.divingFish`：水鱼开发者 Token，用于查询水鱼详细成绩。
+- `developerTokens.lxns`：落雪开发者 Token，用于访问 LXNS 开发者接口。
+- `oauth.enabled`：是否启用落雪 OAuth 用户授权。
+- `oauth.clientId`、`oauth.clientSecret`：落雪 OAuth 客户端凭据。
+- `oauth.tokenCipherKey`：持久化 OAuth Token 的本地加密密钥。启用 OAuth 时必须配置稳定、高熵的值。
+- `resourceSync`：控制曲目、封面、头像、姓名框和段位资源的同步及缓存。
+- `render`：控制 Takumi 渲染并发、等待队列和单次任务超时。内存较小时应降低 `concurrency`。
+- `publicBaseUrl`：外部用户和第三方服务可访问的 HTTP(S) 根地址；留空时使用 Koishi Server `selfUrl`。
+- `administrators`：可执行别名、猜歌和排卡管理操作的 Koishi 用户 ID。
+- `compatibilityMode`：全局关闭 QQ 原生富媒体交互，改用普通文本和图片回复。
 
-公网路由如下：
+`resourceSync.allowedHosts` 应填写资源同步允许访问的额外主机名，不包含协议和路径。生产环境建议使用 HTTPS，并明确配置主机白名单。
+
+## 查分器绑定
+
+首次查询前，按以下顺序完成设置：
+
+1. 绑定查询使用的 QQ 号：
+
+   ```text
+   /mai 绑定 <QQ 号>
+   ```
+
+2. 绑定至少一个查分器：
+
+   ```text
+   /mai 绑定落雪
+   /mai 绑定水鱼 <水鱼成绩导入 Token>
+   ```
+
+3. 选择成绩查询使用的查分器：
+
+   ```text
+   /mai 设置查分器
+   ```
+
+   插件会提供“自动”“水鱼”“落雪”按钮。自动模式会依次尝试当前可用的查分器。
+
+4. 查询成绩：
+
+   ```text
+   /mai B50
+   ```
+
+落雪绑定会跳转到 OAuth 授权页面。水鱼绑定需要用户自己的成绩导入 Token；插件配置中的水鱼开发者 Token 与用户导入 Token 用途不同。
+
+## 常用命令
+
+所有功能均支持 `/mai ...` 形式。聊天中的兼容触发词只在精确匹配时接管消息。
+
+| 场景 | 命令示例 |
+| --- | --- |
+| 帮助 | `/mai` |
+| QQ 绑定 | `/mai 绑定 <QQ 号>` |
+| 查分器选择 | `/mai 设置查分器`、`/mai 设置查分器 自动`、`/mai 设置查分器 水鱼`、`/mai 设置查分器 落雪` |
+| 查分器绑定 | `/mai 绑定落雪`、`/mai 解绑落雪`、`/mai 绑定水鱼 <Token>` |
+| Rating 图片 | `/mai B15`、`/mai B25`、`/mai B35`、`/mai B40`、`/mai B50` |
+| 单曲成绩 | `/mai info <曲目>`、`/mai minfo <曲目>`、`/mai 紫谱成绩 <曲目>` |
+| 曲目查询 | `/mai id123`、`/mai 查歌 <关键词>`、`/mai 随个`、`/mai 今日舞萌` |
+| 列表与表格 | `/mai 分数列表`、`/mai 定数表`、`/mai 完成表`、`/mai 未完成表`、`/mai 段位表` |
+| 进度查询 | `/mai <条件>进度` |
+| 分数计算 | `/mai 分数线 <参数>` |
+| 图片设置 | `/mai 设置头像 <头像>`、`/mai 设置牌子 <牌子>`、`/mai 设置mai` |
+| 猜歌 | `/mai 猜歌`、`/mai 舞萌开字母`、`/mai 启用猜歌`、`/mai 禁用猜歌` |
+| 排卡 | `/mai 排卡管理`、`/mai 几`、机厅别名加人数 |
+| 成绩更新 | `/mai 更新`、`/mai 导` |
+| 平台回退 | `/mai 兼容模式`、`/mai 关闭兼容模式` |
+
+查询自己但尚未绑定 QQ 时，插件会暂存原命令，并在绑定成功后自动继续查询。未绑定查分器或未导入成绩时，QQ 平台会提供对应的绑定按钮。
+
+## 回调与兼容模式
+
+插件注册以下公网路由：
 
 | 路由 | 用途 |
 | --- | --- |
-| `GET <oauth.callbackPath>` | 落雪 OAuth code 回调。 |
-| `GET /mai-plugin/update?token=...` | 发起舞萌授权跳转。 |
-| `GET /mai-plugin/proxy-config/:type` | 输出 `sing-box`、`throne`、`nekoray`、`nekobox` 或 `clash` 配置。 |
-| `ALL /wc_auth/oauth/callback/maimai-dx` | 接收舞萌授权回调；实际仅允许 GET。 |
+| `GET <oauth.callbackPath>` | 接收落雪 OAuth 回调。 |
+| `GET /mai-plugin/update?token=...` | 发起舞萌成绩更新授权跳转。 |
+| `GET /mai-plugin/proxy-config/:type` | 生成 `sing-box`、`throne`、`nekoray`、`nekobox` 或 `clash` 配置。 |
+| `GET /wc_auth/oauth/callback/maimai-dx` | 接收舞萌成绩更新回调。 |
 
-落雪 redirect URI 由公网根地址和 `oauth.callbackPath` 拼接。公网根地址优先使用 `publicBaseUrl`，为空时使用 Koishi Server `selfUrl`。例如：
-
-```text
-publicBaseUrl = https://bot.example.com
-oauth.callbackPath = /callbacks/lxns
-redirect URI = https://bot.example.com/callbacks/lxns
-```
-
-落雪控制台登记的 redirect URI 必须与最终计算结果完全一致。修改 `oauth.callbackPath` 后需要同步更新落雪控制台配置。
-
-水鱼更新使用的舞萌回调为：
+落雪 OAuth 的 redirect URI 为 `publicBaseUrl`（或 Koishi Server `selfUrl`）与 `oauth.callbackPath` 的组合。例如：
 
 ```text
-<publicBaseUrl>/wc_auth/oauth/callback/maimai-dx
+https://bot.example.com/mai-plugin/lxns/callback
 ```
 
-生成的客户端配置会将 `tgk-wcaime.wahlap.com` 指向 `publicBaseUrl` 对应的 HTTP 代理端点。**本插件不实现通用 HTTP CONNECT 转发代理。** 部署者必须单独提供受控代理，并满足以下要求：
+控制台登记的 redirect URI 必须与插件最终生成的地址完全一致。
 
-- 只允许转发到舞萌授权所需的固定域名和端口。
-- 使用防火墙、VPN、来源白名单或认证限制访问；不得暴露无认证开放代理。
-- 保留 Koishi 回调所需的原始 Host，并正确配置受信反向代理。
-- 在部署前确认第三方服务条款、所在地法律和网络管理政策允许该流程。
+水鱼成绩更新需要部署者另行提供受控 HTTP 代理。本插件只生成客户端配置和处理回调，不实现通用 HTTP CONNECT 转发代理。不得暴露无认证的开放代理，并应限制目标域名、端口和访问来源。
 
-若没有满足这些要求的代理，不要使用 `更新`/`导` 功能或向用户分发代理配置。
+QQ 平台会在帮助、绑定、分页和可恢复错误中使用原生 Markdown 与按钮。非 QQ 平台、适配器不支持富媒体或启用 `compatibilityMode` 时，插件会继续使用普通文本和图片回复。
 
-## 命令
+OAuth Token、水鱼导入 Token、开发者 Token、QQ 号和 friend code 都属于敏感信息。请勿在日志、聊天记录、工单或截图中公开；`oauth.tokenCipherKey` 更换前应先迁移或清理已有 OAuth Token。
 
-所有命令均支持 `/mai ...` 形式；兼容触发词仅在精确匹配时接管消息。
+## 项目结构
 
-| 分类 | 主要触发词 |
-| --- | --- |
-| 帮助 | `mai` |
-| 绑定与设置 | `bind`、`绑定`、`设置查分器`、`设置水鱼`、`设置落雪`、`兼容模式`、`设置头像`、`设置牌子`、`设置mai`、`默认` |
-| 曲目 | `id123`、难度 + `id123`、`随个`、`查歌`、`搜索`、定数/拟合定数/谱师/版本/曲师/正则/BPM 查歌 |
-| 别名 | `添加别名`、`删除别名` |
-| 每日与音频 | `今日舞萌`、`预览` |
-| Rating 图片 | `B15`、`B25`、`B35`、`B40`、`B50`、随心配过滤 |
-| 成绩与列表 | `info`、`minfo`、难度成绩、`分数列表`、`成绩列表` |
-| 等级与段位 | `定数表`、`完成表`、`进度表`、`未完成表`、`段位表`、`<条件>进度` |
-| 计算 | `分数线` |
-| 猜歌 | `猜歌`、`舞萌开字母`、`开字母`、`开歌`、`不玩了`、启用/禁用猜歌 |
-| 排卡 | `排卡管理`、`几`、`机厅别名+人数`、`机厅别名+/-人数` |
-| 更新 | `更新`、`导`、`绑定水鱼 <水鱼成绩导入Token>` |
+```text
+mai-plugin/
+├─ assets/
+│  ├─ fallback/          # 缺失远程资源时使用的默认图片
+│  ├─ fonts/             # Takumi 渲染使用的字体及授权说明
+│  └─ generated/         # 段位、状态和 Rating 等渲染素材
+├─ docs/
+│  └─ superpowers/       # 设计与实施记录
+├─ src/
+│  ├─ commands/          # Koishi 命令、快捷触发词和交互引导
+│  ├─ data/              # 资源清单、缓存、标准化和同步服务
+│  ├─ database/          # 数据表声明与仓储实现
+│  ├─ domain/            # 曲目、玩家、Rating 和枚举等领域模型
+│  ├─ platform/          # QQ 富媒体、回退消息、权限与命令路由
+│  ├─ providers/         # 水鱼、落雪查分器及查询链
+│  ├─ query/             # 组合查询解析、过滤规则和执行器
+│  ├─ render/            # Takumi 渲染服务、节点和图片模板
+│  ├─ server/            # OAuth、成绩更新、代理配置和 HTTP 路由
+│  ├─ services/          # 查询、设置、别名、猜歌、排卡和更新业务
+│  ├─ utils/             # 字符串与并发控制工具
+│  ├─ config.ts          # 插件配置类型与 Schema
+│  ├─ constants.ts       # 插件名称、注入服务和生命周期常量
+│  ├─ index.ts           # Koishi 插件入口及生命周期装配
+│  └─ types.ts           # 生命周期与插件上下文类型
+├─ package.json          # npm 与 Koishi 插件元数据
+├─ tsconfig.json         # Koishi 工作区 TypeScript 配置
+└─ README.md             # 使用与开发文档
+```
 
-落雪 OAuth 也提供显式入口：
+运行期间的资源快照和试听文件默认写入 `data/maimai`，该路径可通过 `resourceSync.cacheDir` 修改。
 
-- `/mai 绑定落雪`、`/mai bind-lxns`、`绑定落雪`：发起或重新发起 OAuth 授权。
-- `/mai 解绑落雪`、`/mai unbind-lxns`、`解绑落雪`：删除当前用户的落雪 OAuth Token 和未完成授权状态，不影响 QQ 绑定或水鱼 Token。
+## 开发
 
-查询自己且未绑定 QQ 时，插件会暂存原命令；绑定完成后自动重放。落雪返回 OAuth 必需错误时，仅自己的查询会启动授权，查询他人不会借用请求者身份授权。
+本插件使用 Koishi 根工作区提供的 TypeScript、Yakumo 和开发依赖，不在插件包内维护独立构建脚本或测试工具。
 
-## QQ Raw Markdown 与平台回退
-
-QQ 平台上的帮助、绑定、OAuth、分页和可恢复错误使用非空 `qq:rawmarkdown` 正文并下挂原生按钮。个人绑定与授权按钮仅允许发起用户操作；OAuth 按钮只跳转 HTTPS 地址。无法使用按钮时，正文仍会给出可手动执行的命令或授权说明。
-
-非 QQ 平台以及启用 `compatibilityMode` 时，不发送 QQ 专用元素，继续使用普通文本和图片回复。
-
-## 安全注意事项
-
-- OAuth state 和更新 token 是 256 位随机、10 分钟过期、单次消费的内存值。插件重启后未完成回调会失效。
-- 回调身份只取自服务端 state，不读取 query 中的用户 ID。
-- 舞萌回调同时检查原始 Host 和解析后的 Host。仅在明确配置受信代理时启用 Koishi/Koa 的代理信任。
-- 使用 HTTPS 公网地址；不要在聊天、日志、工单或截图中暴露 OAuth code/state、更新 token、开发者 Token、水鱼导入 Token、QQ 或 friend code。
-- `oauth.tokenCipherKey` 应至少使用 32 字节随机秘密，并保持稳定；更换密钥前应清理或迁移已有 OAuth Token。
-- 资源同步只接受 HTTP(S)；生产环境应使用 HTTPS，并显式设置 `resourceSync.allowedHosts` 白名单。清单与文件均校验大小和摘要。
-- 舞萌页面响应限制为 5 MiB，每页最多解析 5000 条记录；Cookie 数量和转发总长度也有限制。
-- 用户正则最长 128 字符，并在受限 worker/超时内执行。Takumi 只接收内部节点，不渲染用户提供的 HTML/CSS。
-- 渲染并发和队列必须按机器内存调低。生产默认并发为 4，实际内存占用会随平台、查询内容和素材变化。
-- 定期检查 `yarn npm audit` 和 Koishi 安全公告。不要在未评估兼容性的情况下执行强制降级或强制修复。
-
-## 构建
-
-正式构建只使用根工作区 Yakumo 管线：
+在 Koishi 根目录执行完整构建：
 
 ```powershell
 cd C:\koishi-app
-yarn build mai-plugin
+yarn build
 ```
 
-插件不自带构建、测试或资源生成工具；TypeScript、Yakumo 与相关开发依赖统一由 Koishi 根工作区提供。
+## 许可证
+
+MIT

@@ -6,8 +6,10 @@ import {
 } from '../services/queue-service'
 import {
   commandAction,
+  createQqCommandGuidance,
   replyText,
   type ActiveCommandSession,
+  type QqCommandGuidanceButton,
   type ReplyCommandDependencies,
 } from './support'
 
@@ -38,6 +40,47 @@ export const QUEUE_HELP_TEXT = [
   '修改机厅：@可怜BOT 排卡管理 添加机厅/删除机厅 机厅名称',
   '机厅别名：@可怜BOT 排卡管理 查看别名/添加别名/删除别名 机厅名称 (别名)',
 ].join('\n')
+
+const queueActionRows: readonly (readonly QqCommandGuidanceButton[])[] = [
+  [
+    queueAction('queue-add-arcade', '添加机厅', '添加机厅'),
+    queueAction('queue-delete-arcade', '删除机厅', '删除机厅'),
+    queueAction('queue-view-aliases', '查看别名', '查看别名'),
+  ],
+  [
+    queueAction('queue-add-alias', '添加别名', '添加别名'),
+    queueAction('queue-delete-alias', '删除别名', '删除别名'),
+    queueAction('queue-bind-group', '添加分组', '添加分组'),
+  ],
+]
+
+function queueAction(id: string, label: string, operation: string): QqCommandGuidanceButton {
+  return {
+    id,
+    label,
+    command: `/mai 排卡管理 ${operation}`,
+    enter: false,
+    reply: false,
+  }
+}
+
+function queueMenu(content: string) {
+  return createQqCommandGuidance(content, queueActionRows)
+}
+
+function queueOperation(content: string, id: string, label: string, operation: string) {
+  return createQqCommandGuidance(content, [[queueAction(id, label, operation)]])
+}
+
+function queueStatus(content: string) {
+  return createQqCommandGuidance(content, [[{
+    id: 'queue-manage',
+    label: '排卡管理',
+    command: '/mai 排卡管理',
+    enter: true,
+    reply: false,
+  }]])
+}
 
 async function administratorSubject(session: ActiveCommandSession) {
   let authority = (session.user as { authority?: number } | undefined)?.authority
@@ -75,59 +118,96 @@ async function manageQueue(
     switch (operation) {
       case '添加机厅':
         if (!name) {
-          await replyText(session, dependencies, '使用方法：/排卡管理 添加机厅 机厅名称')
+          const text = '使用方法：/mai 排卡管理 添加机厅 <机厅名称>'
+          await replyText(session, dependencies, text, queueOperation(
+            text,
+            'queue-add-arcade-input',
+            '填写机厅名称',
+            '添加机厅',
+          ))
           return
         }
         await dependencies.queueService.addArcade(session.channelId, name)
-        await replyText(session, dependencies, '添加机厅成功。')
+        await replyText(session, dependencies, '添加机厅成功。', queueMenu('添加机厅成功。'))
         return
       case '删除机厅':
         if (!name) {
-          await replyText(session, dependencies, '使用方法：/排卡管理 删除机厅 机厅名称')
+          const text = '使用方法：/mai 排卡管理 删除机厅 <机厅名称>'
+          await replyText(session, dependencies, text, queueOperation(
+            text,
+            'queue-delete-arcade-input',
+            '填写机厅名称',
+            '删除机厅',
+          ))
           return
         }
         await dependencies.queueService.deleteArcade(session.channelId, name)
-        await replyText(session, dependencies, '删除机厅成功。')
+        await replyText(session, dependencies, '删除机厅成功。', queueMenu('删除机厅成功。'))
         return
       case '添加别名':
-        if (!name) {
-          await replyText(session, dependencies, '请输入别名！')
+        if (!name || !alias) {
+          const text = '使用方法：/mai 排卡管理 添加别名 <机厅名称> <别名>'
+          await replyText(session, dependencies, text, queueOperation(
+            text,
+            'queue-add-alias-input',
+            '填写机厅和别名',
+            '添加别名',
+          ))
           return
         }
         await dependencies.queueService.addAlias(session.channelId, name, alias)
-        await replyText(session, dependencies, '添加机厅别名成功。')
+        await replyText(session, dependencies, '添加机厅别名成功。', queueMenu('添加机厅别名成功。'))
         return
       case '删除别名':
-        if (!name) {
-          await replyText(session, dependencies, '请输入别名！')
+        if (!name || !alias) {
+          const text = '使用方法：/mai 排卡管理 删除别名 <机厅名称> <别名>'
+          await replyText(session, dependencies, text, queueOperation(
+            text,
+            'queue-delete-alias-input',
+            '填写机厅和别名',
+            '删除别名',
+          ))
           return
         }
         await dependencies.queueService.deleteAlias(session.channelId, name, alias)
-        await replyText(session, dependencies, '删除机厅别名成功。')
+        await replyText(session, dependencies, '删除机厅别名成功。', queueMenu('删除机厅别名成功。'))
         return
       case '查看别名': {
         if (!name) {
-          await replyText(session, dependencies, '请输入要查看别名的机厅！')
+          const text = '使用方法：/mai 排卡管理 查看别名 <机厅名称>'
+          await replyText(session, dependencies, text, queueOperation(
+            text,
+            'queue-view-aliases-input',
+            '填写机厅名称',
+            '查看别名',
+          ))
           return
         }
         const aliases = await dependencies.queueService.aliases(session.channelId, name)
-        await replyText(session, dependencies, `机厅别名如下：${aliases.join('，')}`)
+        const text = `机厅别名如下：${aliases.join('，')}`
+        await replyText(session, dependencies, text, queueMenu(text))
         return
       }
       case '添加分组':
         if (!name) {
-          await replyText(session, dependencies, QUEUE_HELP_TEXT)
+          const text = '使用方法：/mai 排卡管理 添加分组 <分组名称>'
+          await replyText(session, dependencies, text, queueOperation(
+            text,
+            'queue-bind-group-input',
+            '填写分组名称',
+            '添加分组',
+          ))
           return
         }
         await dependencies.queueService.bindGroup(session.channelId, name)
-        await replyText(session, dependencies, '设置分组成功。')
+        await replyText(session, dependencies, '设置分组成功。', queueMenu('设置分组成功。'))
         return
       default:
-        await replyText(session, dependencies, QUEUE_HELP_TEXT)
+        await replyText(session, dependencies, QUEUE_HELP_TEXT, queueMenu(QUEUE_HELP_TEXT))
     }
   } catch (error) {
     if (error instanceof QueueServiceError) {
-      await replyText(session, dependencies, error.message)
+      await replyText(session, dependencies, error.message, queueMenu(error.message))
       return
     }
     throw error
@@ -150,7 +230,12 @@ export function createQueueMiddleware(
       throw error
     }
     if (!result) return next()
-    await replyText(session as ActiveCommandSession, dependencies, result.text)
+    await replyText(
+      session as ActiveCommandSession,
+      dependencies,
+      result.text,
+      queueStatus(result.text),
+    )
   }
 }
 
@@ -158,10 +243,7 @@ export function registerQueueCommands(
   ctx: Context,
   dependencies: QueueCommandDependencies,
 ): QueueCommandRegistration {
-  const command = ctx.command('mai.queue [input:text]', '管理机厅排卡', {
-    authority: 4,
-    permissions: ['authority:0'],
-  })
+  const command = ctx.command('mai.queue [input:text]', '管理机厅排卡')
     .shortcut(/^\/mai\s+排卡管理(?:\s+(.*))?$/u, { args: ['$1'] })
     .action(commandAction(async ({ session }, input = '') => {
       await manageQueue(session, dependencies, input)

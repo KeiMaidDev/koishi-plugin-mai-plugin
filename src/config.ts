@@ -86,14 +86,12 @@ export const ConfigSchema: Schema<Config> = Schema.object({
 export const Config = ConfigSchema
 
 export const usage = `
-## 使用说明
+**本项目由各种AI工具开发，存在一定的问题，见谅，如有更好的实现欢迎 PR，有好的提议欢迎提ISSUE！**
 
-首次查询前，请依次完成以下设置：
+面向 Koishi 的舞萌 DX 查询插件，移植自[可怜BOT](https://github.com/xszqxszq/KarenBot) 的舞萌查分插件
 
-1. 发送 \`/mai 绑定 <QQ 号>\` 绑定查询账号。
-2. 发送 \`/mai 绑定落雪\`，或发送 \`/mai 绑定水鱼 <水鱼成绩导入 Token>\` 绑定查分器。
-3. 发送 \`/mai 设置查分器\`，通过按钮选择自动、水鱼或落雪。
-4. 发送 \`/mai B50\` 查询成绩，发送 \`/mai\` 查看完整功能菜单。
+插件需要以下配置：[水鱼查分器](https://maimai.diving-fish.com/)开发者令牌，[落雪咖啡屋](https://maimai.lxns.net/)开发者令牌以及OAuth客户端ID、密钥、令牌加密密钥。
 
-启用落雪 OAuth 或水鱼成绩更新时，请正确配置 Koishi Server 的 \`selfUrl\` 或插件的 \`publicBaseUrl\`。
+请确保您的koishi处于公网可访问状态，或者配置了反向代理，确保落雪OAuth回调地址可访问。
+申请落雪OAuth客户端时，务必勾选所有应用权限范围，否则落雪查分器可能无法正常使用。
 `.trim()

@@ -28,7 +28,7 @@ export class PublicCallbackUnavailableError extends Error {
 
 export class UpdateBindingRequiredError extends Error {
   constructor() {
-    super('请发送“/mai 绑定水鱼 <水鱼成绩导入 Token>”完成绑定。')
+    super('请填写水鱼查询token完成绑定。')
     this.name = 'UpdateBindingRequiredError'
   }
 }

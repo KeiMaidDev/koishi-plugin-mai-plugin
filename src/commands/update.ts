@@ -119,7 +119,7 @@ export function registerUpdateCommands(
           const url = await dependencies.updateService.beginLxnsOAuth(
             createUpdateSessionLocator(session, dependencies, ''),
           )
-          const text = `请授权 BOT 访问您在落雪查分器的成绩。无法使用按钮时，请复制以下 HTTPS 链接打开：\n${url}`
+          const text = `请点击下方按钮授权 BOT 访问您在落雪查分器的成绩。`
           await replyText(session, dependencies, text, createQqUrlGuidance(text, {
             id: 'lxns-oauth',
             label: '前往落雪授权',

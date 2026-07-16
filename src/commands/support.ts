@@ -302,7 +302,7 @@ export async function replyQueryError(
     }]]))
     return
   }
-  if (message.code === 'provider-unbound') {
+  if (message.code === 'provider-unbound' || (isSelf && message.code === 'oauth-required')) {
     await replyText(session, dependencies, message.text, createQqCommandGuidance(message.text, [[
       {
         id: 'bind-lxns',

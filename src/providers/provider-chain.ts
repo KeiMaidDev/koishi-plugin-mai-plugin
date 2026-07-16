@@ -138,7 +138,6 @@ export class ProviderChain {
         const cancellation = findCancellationError(error)
         if (cancellation) throw cancellation
         const failure = this.normalizeFailure(provider, user, error)
-        if (failure instanceof ProviderOAuthRequiredError) throw failure
         failures.push(failure)
       }
     }

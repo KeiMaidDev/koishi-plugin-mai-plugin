@@ -106,7 +106,7 @@ export interface QqCommandGuidanceButton {
   visitedLabel?: string
   style?: 0 | 1
   enter: boolean
-  reply: boolean
+  reply: false
   unsupportTips?: string
 }
 
@@ -129,7 +129,6 @@ export function createQqCommandGuidance(
       button.label,
       createQqCommandAction(button.command, {
         enter: button.enter,
-        reply: button.reply,
         unsupportTips: button.unsupportTips,
       }),
       button.style,
@@ -227,7 +226,7 @@ export async function replyQueryError(
                 label: '重试授权',
                 command: options.retryCommand,
                 enter: true,
-                reply: true,
+                reply: false,
               }]])
             : undefined,
         ),
@@ -265,14 +264,14 @@ export async function replyQueryError(
               label: '选择查分器',
               command: '/mai 设置查分器',
               enter: true,
-              reply: true,
+              reply: false,
             },
             {
               id: 'oauth-bind-diving-fish',
               label: '绑定水鱼',
               command: '/mai 绑定水鱼',
               enter: false,
-              reply: true,
+              reply: false,
               unsupportTips: '请在正文命令后补充水鱼导入 Token 并手动发送。',
             },
           ]]),
@@ -285,7 +284,7 @@ export async function replyQueryError(
         label: '重试授权',
         command: '/mai 绑定落雪',
         enter: true,
-        reply: true,
+        reply: false,
       }]]))
       return
     }
@@ -297,7 +296,7 @@ export async function replyQueryError(
       label: '绑定 QQ',
       command: '/mai 绑定',
       enter: false,
-      reply: true,
+      reply: false,
       unsupportTips: '请在正文命令后补充 QQ 号并手动发送。',
     }]]))
     return
@@ -314,14 +313,14 @@ export async function replyQueryError(
         label: '绑定落雪',
         command: '/mai 绑定落雪',
         enter: true,
-        reply: true,
+        reply: false,
       },
       {
         id: 'bind-diving-fish',
         label: '绑定水鱼',
         command: '/mai 绑定水鱼',
         enter: false,
-        reply: true,
+        reply: false,
         unsupportTips: '请在正文命令后补充水鱼导入 Token 并手动发送。',
       },
     ]]))
@@ -332,7 +331,7 @@ export async function replyQueryError(
     label: '返回帮助',
     command: '/mai',
     enter: true,
-    reply: true,
+    reply: false,
   }]]))
 }
 

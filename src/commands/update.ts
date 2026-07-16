@@ -45,7 +45,7 @@ export function createUpdateSessionLocator(
             label: '重试授权',
             command: options.retryCommand,
             enter: true,
-            reply: true,
+            reply: false,
           }]])
         : undefined,
     ),
@@ -73,14 +73,14 @@ async function updateFailure(
         label: '选择查分器',
         command: '/mai 设置查分器',
         enter: true,
-        reply: true,
+        reply: false,
       },
       {
         id: 'update-bind-diving-fish',
         label: '绑定水鱼',
         command: '/mai 绑定水鱼',
         enter: false,
-        reply: true,
+        reply: false,
         unsupportTips: '请在正文命令后补充水鱼导入 Token 并手动发送。',
       },
     ]]))
@@ -92,7 +92,7 @@ async function updateFailure(
       label: '填写水鱼 Token',
       command: '/mai 绑定水鱼',
       enter: false,
-      reply: true,
+      reply: false,
       unsupportTips: '请在正文命令后补充水鱼导入 Token 并手动发送。',
     }]]))
     return
@@ -103,7 +103,7 @@ async function updateFailure(
     label: retryCommand ? '重试' : '返回帮助',
     command: retryCommand ?? '/mai',
     enter: true,
-    reply: true,
+    reply: false,
   }]]))
 }
 
@@ -141,7 +141,7 @@ export function registerUpdateCommands(
             label: '重新绑定落雪',
             command: '/mai 绑定落雪',
             enter: true,
-            reply: true,
+            reply: false,
           }]]))
         } catch (error) {
           await updateFailure(session, dependencies, error, '/mai 解绑落雪')

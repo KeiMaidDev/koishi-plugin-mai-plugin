@@ -29,7 +29,7 @@ export interface QqCallbackButtonAction extends QqButtonActionBase {
 
 export interface QqCommandButtonAction extends QqButtonActionBase {
   type: 2
-  reply: boolean
+  reply: false
   enter: boolean
 }
 
@@ -66,7 +66,6 @@ export interface QqButtonActionOptions {
 
 export interface QqCommandButtonActionOptions extends QqButtonActionOptions {
   enter?: boolean
-  reply?: boolean
 }
 
 export interface QqMarkdownParameter {
@@ -110,7 +109,7 @@ export function createQqCommandAction(
       options.unsupportTips,
       '请在聊天中手动执行正文中的命令。',
     ),
-    reply: options.reply ?? false,
+    reply: false,
     enter: options.enter ?? false,
   }
 }

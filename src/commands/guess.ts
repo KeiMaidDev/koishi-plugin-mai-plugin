@@ -60,7 +60,7 @@ async function sendGuessReply(
     label: '返回帮助',
     command: '/mai',
     enter: true,
-    reply: true,
+    reply: false,
   }]])
   if (reply.type === 'text') {
     await replyText(session, dependencies, reply.text, rich)

@@ -42,7 +42,7 @@ koishi-plugin-mai-plugin
 - 可用的 Koishi HTTP 服务，用于访问水鱼、落雪和静态资源源。
 - QQ 原生 Markdown 和按钮使用 [adapter-qq-crack](https://github.com/koishi-shangxue-plugins/koishi-plugin-adapter-qq-crack) 独有语法；不支持时可启用兼容模式。
 
-需要使用落雪 OAuth 或水鱼成绩更新时，请先配置 Koishi Server 的 `selfUrl`，或设置插件的 `publicBaseUrl`。
+需要使用落雪 OAuth 或水鱼成绩更新时，请先配置 Koishi Server 的 `selfUrl`，或设置插件的 `publicBaseUrl`。落雪 OAuth 还需要将[开发者面板生成的完整授权链接](https://maimai.lxns.net/docs/oauth-guide)填入 `oauth.authorizationUrl`。
 
 
 `resourceSync.allowedHosts` 应填写资源同步允许访问的额外主机名，不包含协议和路径。生产环境建议使用 HTTPS，并明确配置主机白名单。

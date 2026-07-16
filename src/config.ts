@@ -11,6 +11,7 @@ export interface Config {
   }
   oauth: {
     enabled: boolean
+    authorizationUrl: string
     callbackPath?: string
     clientId: string
     clientSecret: string
@@ -44,6 +45,8 @@ export const ConfigSchema: Schema<Config> = Schema.object({
   oauth: Schema.object({
     enabled: Schema.boolean().default(false)
       .description('是否启用 LXNS OAuth 用户授权和成绩同步。'),
+    authorizationUrl: Schema.string().default('')
+      .description('LXNS 开发者面板生成的完整 OAuth 授权链接，必须包含 response_type、client_id、redirect_uri 和 scope。'),
     callbackPath: Schema.string()
       .pattern(LXNS_CALLBACK_PATH_PATTERN)
       .default(DEFAULT_LXNS_CALLBACK_PATH)
@@ -90,7 +93,7 @@ export const usage = `
 
 面向 Koishi 的舞萌 DX 查询插件，移植自[可怜BOT](https://github.com/xszqxszq/KarenBot) 的舞萌查分插件
 
-插件需要以下配置：[水鱼查分器](https://maimai.diving-fish.com/)开发者令牌，[落雪咖啡屋](https://maimai.lxns.net/)开发者令牌以及OAuth客户端ID、密钥、令牌加密密钥。
+插件需要以下配置：[水鱼查分器](https://maimai.diving-fish.com/)开发者令牌，[落雪咖啡屋](https://maimai.lxns.net/)开发者令牌以及 OAuth 授权链接、客户端 ID、密钥、令牌加密密钥。
 
 请确保您的koishi处于公网可访问状态，或者配置了反向代理，确保落雪OAuth回调地址可访问。
 申请落雪OAuth客户端时，务必勾选所有应用权限范围，否则落雪查分器可能无法正常使用。

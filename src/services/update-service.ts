@@ -2,13 +2,14 @@ import type {
   DivingFishImportRecord,
   DivingFishUpdateResponse,
 } from '../providers/diving-fish'
-import { LXNS_ENDPOINTS } from '../providers/lxns'
 import { CallbackStore } from '../server/callback-store'
 import { resolveLxnsCallbackPath } from '../server/lxns-callback'
 import { load } from 'cheerio'
 import type { Context } from 'koishi'
 
 const WAHLAP_ORIGIN = 'https://tgk-wcaime.wahlap.com'
+const LXNS_AUTHORIZE_ORIGIN = 'https://maimai.lxns.net'
+const LXNS_AUTHORIZE_PATH = '/oauth/authorize'
 const WAHLAP_AUTHORIZE_PATH = '/wc_auth/oauth/authorize/maimai-dx'
 const WAHLAP_CALLBACK_PATH = '/wc_auth/oauth/callback/maimai-dx'
 const WAHLAP_MOBILE_ORIGIN = 'https://maimai.wahlap.com'
@@ -19,7 +20,7 @@ const WAHLAP_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit
 export class PublicCallbackUnavailableError extends Error {
   constructor() {
     super(
-      '未完成授权配置，请检查 oauth.enabled、clientId、clientSecret、tokenCipherKey，'
+      '未完成授权配置，请检查 oauth.enabled、authorizationUrl、clientId、clientSecret、tokenCipherKey，'
       + '并设置 publicBaseUrl 或 Koishi Server selfUrl。',
     )
     this.name = 'PublicCallbackUnavailableError'
@@ -57,6 +58,7 @@ export interface UpdateServiceOptions {
   publicBaseUrl: string
   oauth: {
     enabled: boolean
+    authorizationUrl: string
     callbackPath?: string
     clientId: string
     clientSecret: string
@@ -292,6 +294,49 @@ export function lxnsCallbackUrl(publicUrl: string, callbackPath?: string) {
   return publicRoute(publicUrl, resolveLxnsCallbackPath(callbackPath))
 }
 
+function validatedLxnsAuthorizationUrl(
+  rawUrl: string,
+  clientId: string,
+  redirectUri: string,
+) {
+  let authorize: URL
+  try {
+    authorize = new URL(rawUrl.trim())
+  } catch {
+    throw new PublicCallbackUnavailableError()
+  }
+  const uniqueParameter = (name: string) => authorize.searchParams.getAll(name).length === 1
+  if (
+    authorize.origin !== LXNS_AUTHORIZE_ORIGIN
+    || authorize.pathname !== LXNS_AUTHORIZE_PATH
+    || authorize.username
+    || authorize.password
+    || authorize.hash
+    || !uniqueParameter('response_type')
+    || authorize.searchParams.get('response_type') !== 'code'
+    || !uniqueParameter('client_id')
+    || authorize.searchParams.get('client_id') !== clientId.trim()
+    || !uniqueParameter('redirect_uri')
+    || authorize.searchParams.get('redirect_uri') !== redirectUri
+    || !uniqueParameter('scope')
+    || !authorize.searchParams.get('scope')?.trim()
+  ) {
+    throw new PublicCallbackUnavailableError()
+  }
+  return authorize
+}
+
+export function lxnsAuthorizationUrl(
+  rawUrl: string,
+  clientId: string,
+  redirectUri: string,
+  state: string,
+) {
+  const authorize = validatedLxnsAuthorizationUrl(rawUrl, clientId, redirectUri)
+  authorize.searchParams.set('state', state)
+  return authorize.href
+}
+
 function validateCallbackUrl(callbackPath: string) {
   if (!callbackPath.startsWith('/')) throw new UpdateFlowError()
   const callback = new URL(callbackPath, WAHLAP_ORIGIN)
@@ -323,6 +368,7 @@ export class UpdateService {
     this.assertActive()
     if (
       !this.options.oauth.enabled
+      || !this.options.oauth.authorizationUrl.trim()
       || !this.options.oauth.clientId.trim()
       || !this.options.oauth.clientSecret.trim()
       || !this.options.oauth.tokenCipherKey.trim()
@@ -333,12 +379,12 @@ export class UpdateService {
       this.options.publicBaseUrl,
       this.options.oauth.callbackPath,
     )
-    const state = this.lxnsStates.issue(session)
-    const authorize = new URL(`${LXNS_ENDPOINTS.oauth}/authorize`)
-    authorize.searchParams.set('response_type', 'code')
-    authorize.searchParams.set('client_id', this.options.oauth.clientId)
-    authorize.searchParams.set('redirect_uri', redirectUri)
-    authorize.searchParams.set('state', state)
+    const authorize = validatedLxnsAuthorizationUrl(
+      this.options.oauth.authorizationUrl,
+      this.options.oauth.clientId,
+      redirectUri,
+    )
+    authorize.searchParams.set('state', this.lxnsStates.issue(session))
     return authorize.href
   }
 

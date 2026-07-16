@@ -302,8 +302,13 @@ export async function replyQueryError(
     }]]))
     return
   }
-  if (message.code === 'provider-unbound' || (isSelf && message.code === 'oauth-required')) {
-    await replyText(session, dependencies, message.text, createQqCommandGuidance(message.text, [[
+  const shouldGuideProviderBinding = message.code === 'provider-unbound'
+    || (isSelf && (message.code === 'oauth-required' || message.code === 'no-data'))
+  if (shouldGuideProviderBinding) {
+    const text = message.code === 'no-data'
+      ? '未查询到舞萌DX成绩，请先确认已绑定查分器并导入成绩。'
+      : message.text
+    await replyText(session, dependencies, text, createQqCommandGuidance(text, [[
       {
         id: 'bind-lxns',
         label: '绑定落雪',

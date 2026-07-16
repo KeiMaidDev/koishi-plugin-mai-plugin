@@ -35,10 +35,9 @@ export interface QueueCommandRegistration {
 }
 
 export const QUEUE_HELP_TEXT = [
-  '本功能可以提供机厅人数查询及更新功能，支持的功能命令如下：',
-  '查询人数：@可怜BOT 几 (或者 j)',
-  '修改机厅：@可怜BOT 排卡管理 添加机厅/删除机厅 机厅名称',
-  '机厅别名：@可怜BOT 排卡管理 查看别名/添加别名/删除别名 机厅名称 (别名)',
+  '## 舞萌DX',
+  '本功能可以提供机厅人数查询及更新功能。',
+  '支持的功能命令如下：',
 ].join('\n')
 
 const queueActionRows: readonly (readonly QqCommandGuidanceButton[])[] = [
@@ -118,7 +117,7 @@ async function manageQueue(
     switch (operation) {
       case '添加机厅':
         if (!name) {
-          const text = '使用方法：/mai 排卡管理 添加机厅 <机厅名称>'
+          const text = '请填写机厅名称'
           await replyText(session, dependencies, text, queueOperation(
             text,
             'queue-add-arcade-input',
@@ -132,7 +131,7 @@ async function manageQueue(
         return
       case '删除机厅':
         if (!name) {
-          const text = '使用方法：/mai 排卡管理 删除机厅 <机厅名称>'
+          const text = '请填写机厅名称'
           await replyText(session, dependencies, text, queueOperation(
             text,
             'queue-delete-arcade-input',
@@ -146,7 +145,7 @@ async function manageQueue(
         return
       case '添加别名':
         if (!name || !alias) {
-          const text = '使用方法：/mai 排卡管理 添加别名 <机厅名称> <别名>'
+          const text = '请填写机厅名称和别名'
           await replyText(session, dependencies, text, queueOperation(
             text,
             'queue-add-alias-input',
@@ -160,7 +159,7 @@ async function manageQueue(
         return
       case '删除别名':
         if (!name || !alias) {
-          const text = '使用方法：/mai 排卡管理 删除别名 <机厅名称> <别名>'
+          const text = '请填写机厅名称和别名'
           await replyText(session, dependencies, text, queueOperation(
             text,
             'queue-delete-alias-input',
@@ -174,7 +173,7 @@ async function manageQueue(
         return
       case '查看别名': {
         if (!name) {
-          const text = '使用方法：/mai 排卡管理 查看别名 <机厅名称>'
+          const text = '请填写机厅名称'
           await replyText(session, dependencies, text, queueOperation(
             text,
             'queue-view-aliases-input',
@@ -190,7 +189,7 @@ async function manageQueue(
       }
       case '添加分组':
         if (!name) {
-          const text = '使用方法：/mai 排卡管理 添加分组 <分组名称>'
+          const text = '请填写分组名称'
           await replyText(session, dependencies, text, queueOperation(
             text,
             'queue-bind-group-input',

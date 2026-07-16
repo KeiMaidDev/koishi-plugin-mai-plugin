@@ -3,14 +3,9 @@ import type { CoreCommandDependencies } from './support'
 import { commandAction, createQqCommandGuidance, replyText } from './support'
 
 const HELP_TEXT = [
-  '舞萌 DX 常用命令：',
-  '/mai 查歌 <关键词>',
-  '/mai b50',
-  '/mai 绑定 <QQ 号>',
-  '/mai 设置查分器 <自动/水鱼/落雪>',
-  '/mai 猜歌',
-  '/mai 排卡管理',
-  '完整文档：https://otmdb.cn/bot/maimai',
+  '## 舞萌 DX',
+  '这是一个查询舞萌DX成绩及相关信息的功能。',
+  '支持以下功能指令：',
 ].join('\n')
 
 export function registerHelpCommand(
@@ -26,7 +21,7 @@ export function registerHelpCommand(
             id: 'help-search',
             label: '查歌',
             command: '/mai 查歌',
-            enter: true,
+            enter: false,
             reply: false,
           },
           {

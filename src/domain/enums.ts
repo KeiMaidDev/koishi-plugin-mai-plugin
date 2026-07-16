@@ -61,7 +61,7 @@ export class MusicType {
 
 export class MusicGenre {
   static readonly PopsAnime = new MusicGenre(101, '\u6d41\u884c&\u52a8\u6f2b', 'POPS\u30a2\u30cb\u30e1', ['\u52a8\u6f2b', '\u6d41\u884c', '\u4e8c\u6b21\u5143'])
-  static readonly Niconico = new MusicGenre(102, 'niconico\uff06VOCALOID\u2122', 'niconico\u30dc\u30fc\u30ab\u30ed\u30a4\u30c9', ['nico', 'v\u5bb6', 'v', '\u672f\u529b\u53e3', '\u672f', '\u30dc\u30ab\u30ed', '\u30dc\u30fc\u30ab\u30ed\u30a4\u30c9', '\u30cb\u30b3\u30cb\u30b3', '\u30cb\u30b3'])
+  static readonly Niconico = new MusicGenre(102, 'niconico\uff06VOCALOID\u2122', 'niconico\u30dc\u30fc\u30ab\u30ed\u30a4\u30c9', ['niconico & VOCALOID', 'nico', 'v\u5bb6', 'v', '\u672f\u529b\u53e3', '\u672f', '\u30dc\u30ab\u30ed', '\u30dc\u30fc\u30ab\u30ed\u30a4\u30c9', '\u30cb\u30b3\u30cb\u30b3', '\u30cb\u30b3'])
   static readonly Touhou = new MusicGenre(103, '\u4e1c\u65b9Project', '\u6771\u65b9Project', ['\u4e1c\u65b9', '\u4e1c', '\u8f66', '\u6771\u65b9'])
   static readonly Variety = new MusicGenre(104, '\u5176\u4ed6\u6e38\u620f', '\u30b2\u30fc\u30e0\u30d0\u30e9\u30a8\u30c6\u30a3', ['\u5176\u4ed6', 'variety'])
   static readonly Original = new MusicGenre(105, '\u821e\u840c', 'maimai', ['\u821e\u840c', 'maimai'])

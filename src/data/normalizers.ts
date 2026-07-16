@@ -297,9 +297,11 @@ function fromDivingFish(value: unknown[], revision: string): UnknownRecord {
   return {
     revision,
     versions: versionNames.map((name, index) => ({ id: index + 1, name, version: index + 1 })),
-    musics: value.map((entry, musicIndex) => {
+    musics: value.flatMap((entry, musicIndex) => {
       const path = `musics[${musicIndex}]`
       const input = record(entry, path)
+      const title = string(input.title, `${path}.title`, true).trim()
+      if (!title) return []
       const basicInfo = record(input.basic_info, `${path}.basic_info`)
       const chartInputs = array(input.charts, `${path}.charts`)
       const levels = array(input.level, `${path}.level`)
@@ -310,9 +312,9 @@ function fromDivingFish(value: unknown[], revision: string): UnknownRecord {
       const idText = string(input.id, `${path}.id`)
       if (!/^\d+$/.test(idText)) throw new TypeError(`${path}.id must contain digits only`)
       const genre = musicGenre(basicInfo.genre, `${path}.basic_info.genre`)
-      return {
+      return [{
         id: Number(idText),
-        name: string(input.title, `${path}.title`),
+        name: title,
         type: input.type,
         rights: '',
         artist: basicInfo.artist,
@@ -330,7 +332,7 @@ function fromDivingFish(value: unknown[], revision: string): UnknownRecord {
             notesDesigner: chart.charter,
           }
         }),
-      }
+      }]
     }),
     plates: [],
     icons: [],

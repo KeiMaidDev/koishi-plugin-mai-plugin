@@ -2,9 +2,11 @@
 
 [![npm](https://img.shields.io/npm/v/koishi-plugin-mai-plugin?style=flat-square)](https://www.npmjs.com/package/koishi-plugin-mai-plugin)
 
-面向 Koishi 的舞萌 DX 查询插件，提供成绩查询、曲目检索、原生图片渲染、猜歌、排卡和成绩更新功能。
+> [!NOTE]
+> 本项目由各种AI工具开发，存在一定的问题，见谅，如有更好的实现欢迎 PR<br>
+> 有好的提议欢迎提ISSUE！
 
-插件使用 Takumi 原生渲染图片，运行时不依赖 Puppeteer、Playwright、Chromium 或其他浏览器渲染器。
+面向 Koishi 的舞萌 DX 查询插件，移植自[可怜BOT](https://github.com/xszqxszq/KarenBot) 的舞萌查分插件
 
 ## 功能
 
@@ -38,57 +40,10 @@ koishi-plugin-mai-plugin
 - Koishi 4.18.7 或兼容版本。
 - Koishi `database` 与 `server` 服务；数据库驱动需要支持插件注册的数据表和 `upsert`。
 - 可用的 Koishi HTTP 服务，用于访问水鱼、落雪和静态资源源。
-- 当前平台可用的 `@takumi-rs/core` 与 `@takumi-rs/helpers` 原生包。
-- QQ 原生 Markdown 和按钮需要适配器支持；不支持时可启用兼容模式。
+- QQ 原生 Markdown 和按钮使用 [adapter-qq-crack](https://github.com/koishi-shangxue-plugins/koishi-plugin-adapter-qq-crack) 独有语法；不支持时可启用兼容模式。
 
 需要使用落雪 OAuth 或水鱼成绩更新时，请先配置 Koishi Server 的 `selfUrl`，或设置插件的 `publicBaseUrl`。
 
-## 基础配置
-
-插件市场安装后，在插件配置页填写所需配置。以下示例展示主要配置及默认值：
-
-```yaml
-developerTokens:
-  divingFish: ""
-  lxns: ""
-
-oauth:
-  enabled: false
-  callbackPath: /mai-plugin/lxns/callback
-  clientId: ""
-  clientSecret: ""
-  tokenCipherKey: ""
-
-resourceSync:
-  enabled: true
-  intervalMinutes: 60
-  timeoutMs: 10000
-  cacheDir: data/maimai
-  staticBaseUrl: ""
-  allowedHosts: []
-
-render:
-  concurrency: 4
-  queueLimit: 64
-  timeoutMs: 30000
-
-publicBaseUrl: ""
-administrators: []
-compatibilityMode: false
-```
-
-关键配置说明：
-
-- `developerTokens.divingFish`：水鱼开发者 Token，用于查询水鱼详细成绩。
-- `developerTokens.lxns`：落雪开发者 Token，用于访问 LXNS 开发者接口。
-- `oauth.enabled`：是否启用落雪 OAuth 用户授权。
-- `oauth.clientId`、`oauth.clientSecret`：落雪 OAuth 客户端凭据。
-- `oauth.tokenCipherKey`：持久化 OAuth Token 的本地加密密钥。启用 OAuth 时必须配置稳定、高熵的值。
-- `resourceSync`：控制曲目、封面、头像、姓名框和段位资源的同步及缓存。
-- `render`：控制 Takumi 渲染并发、等待队列和单次任务超时。内存较小时应降低 `concurrency`。
-- `publicBaseUrl`：外部用户和第三方服务可访问的 HTTP(S) 根地址；留空时使用 Koishi Server `selfUrl`。
-- `administrators`：可执行别名、猜歌和排卡管理操作的 Koishi 用户 ID。
-- `compatibilityMode`：全局关闭 QQ 原生富媒体交互，改用普通文本和图片回复。
 
 `resourceSync.allowedHosts` 应填写资源同步允许访问的额外主机名，不包含协议和路径。生产环境建议使用 HTTPS，并明确配置主机白名单。
 
@@ -209,13 +164,12 @@ mai-plugin/
 
 ## 开发
 
-本插件使用 Koishi 根工作区提供的 TypeScript、Yakumo 和开发依赖，不在插件包内维护独立构建脚本或测试工具。
 
-在 Koishi 根目录执行完整构建：
+
+在 Koishi 根目录执行：
 
 ```powershell
-cd C:\koishi-app
-yarn build
+yarn clone https://github.com/KeiMaidDev/koishi-plugin-mai-plugin
 ```
 
 ## 许可证

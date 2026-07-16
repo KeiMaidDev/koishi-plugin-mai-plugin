@@ -354,5 +354,5 @@ export async function replyImage(
 }
 
 export async function replyAudio(session: ActiveCommandSession, audio: Buffer | Uint8Array) {
-  await session.send(h.audio(Buffer.from(audio), 'audio/ogg'))
+  await session.send(h.audio(Buffer.from(audio), 'audio/mpeg'))
 }

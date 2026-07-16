@@ -44,7 +44,7 @@ export class MusicInfo {
   ) {}
 
   get resourceId() {
-    return this.id % 10_000
+    return this.id >= 100_000 ? this.id : this.id % 10_000
   }
 
   get fakeReMaster() {

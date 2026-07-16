@@ -9,7 +9,7 @@ export const GUESS_CROP_SIZE = Object.freeze({ width: 420, height: 420 })
 export const GUESS_FINAL_SIZE = Object.freeze({ width: 900, height: 520 })
 
 export interface GuessCoverSource {
-  coverPath(resourceId: number): string
+  coverPath(resourceId: number): string | Promise<string>
 }
 
 export interface GuessCropRenderInput {

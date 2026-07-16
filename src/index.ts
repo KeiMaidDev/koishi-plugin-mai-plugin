@@ -1,7 +1,6 @@
 import type { Context } from 'koishi'
 import h from '@satorijs/element'
 import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import { Config, ConfigSchema } from './config'
 import {
   registerCoreCommands,
@@ -51,6 +50,7 @@ export * from './domain/player'
 export * from './domain/rating'
 export * from './data/cache-store'
 export * from './data/manifest'
+export * from './data/lxns-assets'
 export * from './data/normalizers'
 export * from './data/sync-service'
 export * from './providers/types'
@@ -224,7 +224,6 @@ export async function createDefaultCommandDependencies(
     }
     throw error
   }
-  const previewDirectory = join(runtime.config.resourceSync.cacheDir, 'preview')
   const wahlapRequest = createKoishiWahlapRequester(ctx.http)
   const wahlapFetcher = new WahlapRecordFetcher({ request: wahlapRequest })
   const updateService = new UpdateService({
@@ -267,7 +266,9 @@ export async function createDefaultCommandDependencies(
     random: Math.random,
     async previewAudio(music) {
       try {
-        const audio = await readFile(join(previewDirectory, `${music.resourceId}.ogg`))
+        const path = await data.previewPath(music.resourceId)
+        if (!path) return null
+        const audio = await readFile(path)
         return audio.byteLength ? audio : null
       } catch {
         return null
@@ -297,7 +298,10 @@ export function createDefaultLifecycle(
   defaultRuntimeStates.set(ctx, state)
 
   const ensureDataSync = (runtime: LifecycleContext) => {
-    state.dataSync ??= dependencies.createDataSync({ config: runtime.config.resourceSync })
+    state.dataSync ??= dependencies.createDataSync({
+      config: runtime.config.resourceSync,
+      lxnsDeveloperToken: runtime.config.developerTokens.lxns,
+    })
     return state.dataSync
   }
 

@@ -23,6 +23,8 @@ export interface DownloadOptions {
   signal?: AbortSignal
   timeoutMs?: number
   validateUrl?: (url: URL) => void
+  headers?: Record<string, string>
+  maxBytes?: number
 }
 
 function normalizedRelativePath(path: string) {
@@ -76,6 +78,7 @@ export class CacheStore {
         response = await this.fetcher(requestedUrl.href, {
           signal: controller.signal,
           redirect: 'manual',
+          headers: options.headers,
         })
         const responseUrl = response.url ? new URL(response.url) : requestedUrl
         options.validateUrl?.(responseUrl)
@@ -94,6 +97,10 @@ export class CacheStore {
       const meter = new Transform({
         transform(chunk: Buffer, _encoding, callback) {
           size += chunk.byteLength
+          if (options.maxBytes !== undefined && size > options.maxBytes) {
+            callback(new Error(`Download exceeded ${options.maxBytes} bytes`))
+            return
+          }
           hash.update(chunk)
           callback(null, chunk)
         },

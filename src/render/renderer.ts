@@ -148,9 +148,9 @@ export class TakumiRenderService {
     return this.initializationPromise
   }
 
-  async loadAsset(path: string, fallbackPath?: string) {
+  async loadAsset(path: string | Promise<string>, fallbackPath?: string) {
     try {
-      return await this.assetCache.load(path)
+      return await this.assetCache.load(await path)
     } catch (error) {
       if (!fallbackPath || !isMissingFile(error)) throw error
       return this.assetCache.load(fallbackPath)

@@ -47,6 +47,12 @@ koishi-plugin-mai-plugin
 
 `resourceSync.allowedHosts` 应填写资源同步允许访问的额外主机名，不包含协议和路径。生产环境建议使用 HTTPS，并明确配置主机白名单。
 
+## 数据源与资源缓存
+
+曲目元数据优先通过 [LXNS maimai API](https://maimai.lxns.net/docs/api/maimai) 获取。LXNS 不可用时自动切换到水鱼曲库；两个远程源都不可用时读取最近一次成功的本地快照，首次运行且没有快照时才使用内置最小数据。
+
+封面、头像、姓名框和试听音频使用 LXNS 游戏资源站。素材仅在实际使用时下载，并持久缓存到 `resourceSync.cacheDir/assets`；已有缓存会直接复用，远程资源暂时不可用时不会覆盖本地文件。插件不会在启动时批量镜像全部素材，以避免触发官方访问频率限制。
+
 ## 查分器绑定
 
 首次查询前，按以下顺序完成设置：

@@ -40,7 +40,7 @@ const secret = () => Schema.string().role('secret').default('')
 export const ConfigSchema: Schema<Config> = Schema.object({
   developerTokens: Schema.object({
     divingFish: secret().description('水鱼查分器开发者令牌，用于查询详细成绩。'),
-    lxns: secret().description('落雪咖啡屋开发者令牌，用于访问 LXNS 开发者接口。'),
+    lxns: secret().description('落雪咖啡屋开发者令牌，用于查询成绩并同步 LXNS 曲目与收藏品数据。'),
   }).description('开发者平台令牌'),
   oauth: Schema.object({
     enabled: Schema.boolean().default(false)
@@ -58,13 +58,13 @@ export const ConfigSchema: Schema<Config> = Schema.object({
   }).description('LXNS OAuth 设置'),
   resourceSync: Schema.object({
     enabled: Schema.boolean().default(true)
-      .description('是否在启动时同步远程乐曲数据和资源。'),
+      .description('是否在启动时同步数据；优先使用 LXNS，失败时切换水鱼，均失败时使用本地快照。'),
     intervalMinutes: Schema.natural().min(1).max(1_440).default(60)
       .description('资源同步检查间隔，单位为分钟。'),
     timeoutMs: Schema.natural().min(1_000).max(120_000).default(10_000)
       .description('单个资源请求的超时时间，单位为毫秒。'),
     cacheDir: Schema.string().min(1).max(512).default('data/maimai')
-      .description('乐曲数据、封面和试听资源的本地缓存目录。'),
+      .description('曲目快照及按需下载的封面、头像、姓名框和试听音频缓存目录。'),
     staticBaseUrl: Schema.string().default('')
       .description('自定义静态资源服务的基础 URL；留空时使用默认数据源。'),
     allowedHosts: Schema.array(Schema.string()).default([])

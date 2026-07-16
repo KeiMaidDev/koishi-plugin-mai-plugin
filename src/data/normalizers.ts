@@ -340,10 +340,105 @@ function fromDivingFish(value: unknown[], revision: string): UnknownRecord {
   }
 }
 
+function fromLxns(value: UnknownRecord, revision: string): UnknownRecord {
+  const versionInputs = array(value.versions, 'versions')
+  const versions = versionInputs.map((entry, index) => {
+    const input = record(entry, `versions[${index}]`)
+    return {
+      id: integer(input.id, `versions[${index}].id`, 0),
+      name: string(input.title, `versions[${index}].title`),
+      version: integer(input.version, `versions[${index}].version`, 0),
+    }
+  })
+  const sortedVersions = [...versions].sort((left, right) => left.version - right.version)
+  const versionName = (version: number) => (
+    sortedVersions.filter(candidate => candidate.version <= version).at(-1)?.name
+  )
+
+  const musics = array(value.songs, 'songs').flatMap((entry, songIndex) => {
+    const path = `songs[${songIndex}]`
+    const input = record(entry, path)
+    const title = string(input.title, `${path}.title`, true).trim()
+    if (!title) return []
+    const id = integer(input.id, `${path}.id`, 1)
+    const version = integer(input.version, `${path}.version`, 0)
+    const resolvedVersionName = versionName(version)
+    if (!resolvedVersionName) throw new TypeError(`${path}.version references unknown version ${version}`)
+    const difficulties = record(input.difficulties, `${path}.difficulties`)
+
+    return (['standard', 'dx', 'utage'] as const).flatMap(type => {
+      const charts = array(difficulties[type] ?? [], `${path}.difficulties.${type}`)
+      if (!charts.length) return []
+      const genre = type === 'utage' ? MusicGenre.Utage.value : string(input.genre, `${path}.genre`)
+      const musicId = type === 'dx' && id < 10_000 ? id + 10_000 : id
+      return [{
+        id: musicId,
+        name: title,
+        type: type === 'dx' ? 'dx' : 'standard',
+        rights: '',
+        artist: string(input.artist, `${path}.artist`, true),
+        genre,
+        bpm: number(input.bpm, `${path}.bpm`, 0, 1_000),
+        version: resolvedVersionName,
+        charts: charts.map((chartEntry, chartIndex) => {
+          const chartPath = `${path}.difficulties.${type}[${chartIndex}]`
+          const chart = record(chartEntry, chartPath)
+          const notesInput = chart.notes === undefined || chart.notes === null
+            ? null
+            : record(chart.notes, `${chartPath}.notes`)
+          return {
+            difficulty: type === 'utage'
+              ? MusicDifficulty.Utage.value
+              : integer(chart.difficulty, `${chartPath}.difficulty`, 0, 4),
+            level: string(chart.level, `${chartPath}.level`),
+            levelValue: number(chart.level_value, `${chartPath}.level_value`, 0, 20),
+            notes: notesInput
+              ? [
+                  integer(notesInput.tap ?? 0, `${chartPath}.notes.tap`),
+                  integer(notesInput.hold ?? 0, `${chartPath}.notes.hold`),
+                  integer(notesInput.slide ?? 0, `${chartPath}.notes.slide`),
+                  integer(notesInput.touch ?? 0, `${chartPath}.notes.touch`),
+                  integer(notesInput.break ?? 0, `${chartPath}.notes.break`),
+                ]
+              : [0, 0, 0, 0, 0],
+            notesDesigner: string(chart.note_designer ?? '', `${chartPath}.note_designer`, true),
+          }
+        }),
+      }]
+    })
+  })
+
+  const collections = (key: 'icons' | 'plates') => array(value[key] ?? [], key).map((entry, index) => {
+    const path = `${key}[${index}]`
+    const input = record(entry, path)
+    return {
+      id: integer(input.id, `${path}.id`, 1),
+      filename: `${integer(input.id, `${path}.id`, 1)}.png`,
+      name: string(input.name, `${path}.name`),
+      genre: string(input.genre ?? '', `${path}.genre`, true),
+      hint: string(input.description ?? '', `${path}.description`, true),
+      requires: [],
+      remasters: [],
+    }
+  })
+
+  return {
+    revision,
+    versions,
+    musics,
+    icons: collections('icons'),
+    plates: collections('plates'),
+    courses: [],
+  }
+}
+
 export function normalizeMaimaiSource(value: unknown, options: { revision?: string } = {}): NormalizedMaimaiSource {
-  const input = Array.isArray(value)
-    ? fromDivingFish(value, options.revision ?? 'diving-fish')
-    : record(value, 'source')
+  const raw = Array.isArray(value) ? value : record(value, 'source')
+  const input = Array.isArray(raw)
+    ? fromDivingFish(raw, options.revision ?? 'diving-fish')
+    : raw.sourceType === 'lxns'
+      ? fromLxns(raw, string(raw.revision ?? options.revision, 'revision'))
+      : raw
   const revision = string(input.revision ?? options.revision, 'revision')
   const versions = normalizeVersions(input.versions)
   const musics = normalizeMusics(input.musics, versions)

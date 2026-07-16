@@ -5,7 +5,8 @@ import type { Config } from '../config'
 import type { GameVersion, MusicInfo } from '../domain/music'
 import { resolvePackageAssetPath } from '../render/assets'
 import { CacheStore, type CachedSnapshot } from './cache-store'
-import { inspectFile, parseResourceManifest, type ResourceManifest, type ResourceManifestFile } from './manifest'
+import { LxnsAssetCache } from './lxns-assets'
+import { inspectFile, parseResourceManifest, sha256, type ResourceManifest, type ResourceManifestFile } from './manifest'
 import {
   normalizeMaimaiSource,
   type CourseInfo,
@@ -15,6 +16,9 @@ import {
 } from './normalizers'
 
 const DEFAULT_PROBER_DATA_URL = 'https://www.diving-fish.com/api/maimaidxprober/music_data'
+const LXNS_SONG_LIST_URL = 'https://maimai.lxns.net/api/v0/maimai/song/list'
+const LXNS_ICON_LIST_URL = 'https://maimai.lxns.net/api/v0/maimai/icon/list'
+const LXNS_PLATE_LIST_URL = 'https://maimai.lxns.net/api/v0/maimai/plate/list'
 const FALLBACK_COVER = resolvePackageAssetPath('fallback/cover.png')
 const FALLBACK_AVATAR = resolvePackageAssetPath('fallback/avatar.png')
 const FALLBACK_PLATE = resolvePackageAssetPath('fallback/plate.png')
@@ -51,6 +55,7 @@ export interface DataSyncLogger {
 
 export interface MaimaiDataSyncOptions {
   config: Config['resourceSync']
+  lxnsDeveloperToken?: string
   fetch?: typeof fetch
   logger?: DataSyncLogger
   proberDataUrl?: string
@@ -99,6 +104,7 @@ export class MaimaiDataStore {
     data: NormalizedMaimaiSource,
     readonly manifest: ResourceManifest,
     files: Map<string, string>,
+    private readonly remoteAssets?: LxnsAssetCache,
   ) {
     this.assetPaths = Object.freeze([...files.values()])
     this.versions = data.versions
@@ -118,11 +124,18 @@ export class MaimaiDataStore {
   }
 
   coverPath(resourceId: number, thumbnail = false) {
-    return (thumbnail ? this.coverThumbnails.get(resourceId) : this.covers.get(resourceId)) ?? FALLBACK_COVER
+    const local = (thumbnail ? this.coverThumbnails.get(resourceId) : this.covers.get(resourceId))
+      ?? this.covers.get(resourceId)
+    if (local) return local
+    const remote = this.remoteAssets?.resolve('jacket', resourceId, FALLBACK_COVER)
+    return remote ? remote.then(path => path ?? FALLBACK_COVER) : FALLBACK_COVER
   }
 
   iconPath(id: number) {
-    return this.avatars.get(id) ?? FALLBACK_AVATAR
+    const local = this.avatars.get(id)
+    if (local) return local
+    const remote = this.remoteAssets?.resolve('icon', id, FALLBACK_AVATAR)
+    return remote ? remote.then(path => path ?? FALLBACK_AVATAR) : FALLBACK_AVATAR
   }
 
   avatarPath(id: number) {
@@ -130,18 +143,29 @@ export class MaimaiDataStore {
   }
 
   platePath(id: number) {
-    return this.plateImages.get(id) ?? FALLBACK_PLATE
+    const local = this.plateImages.get(id)
+    if (local) return local
+    const remote = this.remoteAssets?.resolve('plate', id, FALLBACK_PLATE)
+    return remote ? remote.then(path => path ?? FALLBACK_PLATE) : FALLBACK_PLATE
+  }
+
+  previewPath(resourceId: number) {
+    return this.remoteAssets?.resolve('music', resourceId)
   }
 }
 
 function createRemoteUrlValidator(allowedHosts: string[]) {
-  const allowed = new Set(allowedHosts.map(host => host.toLowerCase()))
+  const allowed = new Set([
+    'maimai.lxns.net',
+    'www.diving-fish.com',
+    ...allowedHosts.map(host => host.toLowerCase()),
+  ])
   return (url: URL) => {
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
       throw new Error(`Unsupported resource source protocol: ${url.protocol}`)
     }
     if (url.username || url.password) throw new Error('Remote resource URLs cannot contain credentials')
-    if (allowed.size && !allowed.has(url.hostname.toLowerCase())) {
+    if (!allowed.has(url.hostname.toLowerCase())) {
       throw new Error(`Remote resource host ${url.hostname} is not allowed`)
     }
   }
@@ -160,12 +184,19 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
   private readonly proberDataUrl: string
   private readonly builtinSource: unknown | null
   private readonly validateRemoteUrl: (url: URL) => void
+  private readonly assets: LxnsAssetCache
   private readonly assetInvalidationListeners = new Set<MaimaiAssetInvalidationListener>()
   private publishedAssetPaths = new Set<string>()
 
   constructor(private readonly options: MaimaiDataSyncOptions) {
     this.logger = options.logger ?? console
     this.cache = new CacheStore(options.config.cacheDir, options.fetch ?? fetch)
+    this.assets = new LxnsAssetCache({
+      cacheDir: options.config.cacheDir,
+      timeoutMs: options.config.timeoutMs,
+      fetch: options.fetch,
+      logger: this.logger,
+    })
     this.proberDataUrl = options.proberDataUrl === undefined ? DEFAULT_PROBER_DATA_URL : options.proberDataUrl
     this.builtinSource = options.builtinSource === undefined ? BUILTIN_SOURCE : options.builtinSource
     this.validateRemoteUrl = createRemoteUrlValidator(options.config.allowedHosts)
@@ -219,7 +250,53 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
     const loaded = snapshot ?? await this.cache.loadSnapshot()
     const source = JSON.parse(await readFile(loaded.sourcePath, 'utf8'))
     const data = normalizeMaimaiSource(source, { revision: loaded.manifest.revision })
-    return new MaimaiDataStore(data, loaded.manifest, loaded.files)
+    return new MaimaiDataStore(data, loaded.manifest, loaded.files, this.assets)
+  }
+
+  private async syncLxnsSource() {
+    const token = this.options.lxnsDeveloperToken?.trim()
+    if (!token) throw new Error('LXNS developer token is unavailable')
+    const staging = await this.cache.createStagingDirectory()
+    try {
+      const requests = [
+        ['songs.json', LXNS_SONG_LIST_URL],
+        ['icons.json', LXNS_ICON_LIST_URL],
+        ['plates.json', LXNS_PLATE_LIST_URL],
+      ] as const
+      await Promise.all(requests.map(([filename, url]) => this.cache.downloadComputed(
+        url,
+        join(staging, filename),
+        {
+          timeoutMs: this.options.config.timeoutMs,
+          maxBytes: 32 * 1024 * 1024,
+          validateUrl: this.validateRemoteUrl,
+          headers: { Authorization: token },
+        },
+      )))
+      const [songs, icons, plates] = await Promise.all(requests.map(([filename]) => (
+        readFile(join(staging, filename), 'utf8').then(JSON.parse)
+      )))
+      const source = {
+        sourceType: 'lxns',
+        ...songs,
+        icons: icons.icons,
+        plates: plates.plates,
+      }
+      const serialized = `${JSON.stringify(source)}\n`
+      const revision = `lxns-${sha256(serialized).slice(0, 16)}`
+      const persisted = { ...source, revision }
+      normalizeMaimaiSource(persisted, { revision })
+      const sourcePath = join(staging, 'source.json')
+      const metadata = await this.cache.writeAtomic(sourcePath, `${JSON.stringify(persisted)}\n`)
+      await Promise.all(requests.map(([filename]) => rm(join(staging, filename), { force: true })))
+      await this.cache.commitSnapshot(staging, revision, {
+        'source.json': { ...metadata, source: LXNS_SONG_LIST_URL },
+      })
+      return this.storeFromCache()
+    } catch (error) {
+      await this.cache.discardStagingDirectory(staging)
+      throw error
+    }
   }
 
   private async syncStaticSource() {
@@ -232,6 +309,7 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
         remoteManifestPath,
         {
           timeoutMs: this.options.config.timeoutMs,
+          maxBytes: 32 * 1024 * 1024,
           validateUrl: this.validateRemoteUrl,
         },
       )
@@ -274,6 +352,7 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
         sourcePath,
         {
           timeoutMs: this.options.config.timeoutMs,
+          maxBytes: 32 * 1024 * 1024,
           validateUrl: this.validateRemoteUrl,
         },
       )
@@ -309,16 +388,25 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
   async startup() {
     const remoteErrors: unknown[] = []
     if (this.options.config.enabled) {
-      if (this.options.config.staticBaseUrl) {
+      try {
+        return this.complete(await this.syncLxnsSource())
+      } catch (error) {
+        remoteErrors.push(error)
+      }
+      if (this.proberDataUrl) {
         try {
-          return this.complete(await this.syncStaticSource())
+          const store = await this.syncProberSource()
+          if (remoteErrors.length) {
+            this.logger.warn('[mai-plugin] LXNS data source is unavailable; using Diving Fish fallback.')
+          }
+          return this.complete(store)
         } catch (error) {
           remoteErrors.push(error)
         }
       }
-      if (this.proberDataUrl) {
+      if (this.options.config.staticBaseUrl) {
         try {
-          return this.complete(await this.syncProberSource())
+          return this.complete(await this.syncStaticSource())
         } catch (error) {
           remoteErrors.push(error)
         }

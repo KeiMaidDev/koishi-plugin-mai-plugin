@@ -35,21 +35,21 @@ function providerSelectionGuidance(text: string) {
       label: '自动',
       command: '/mai 设置查分器 自动',
       enter: true,
-      reply: false,
+      reply: true,
     },
     {
       id: 'provider-diving-fish',
       label: '水鱼',
       command: '/mai 设置查分器 水鱼',
       enter: true,
-      reply: false,
+      reply: true,
     },
     {
       id: 'provider-lxns',
       label: '落雪',
       command: '/mai 设置查分器 落雪',
       enter: true,
-      reply: false,
+      reply: true,
     },
   ]])
 }

@@ -84,3 +84,16 @@ export const ConfigSchema: Schema<Config> = Schema.object({
 })
 
 export const Config = ConfigSchema
+
+export const usage = `
+## 使用说明
+
+首次查询前，请依次完成以下设置：
+
+1. 发送 \`/mai 绑定 <QQ 号>\` 绑定查询账号。
+2. 发送 \`/mai 绑定落雪\`，或发送 \`/mai 绑定水鱼 <水鱼成绩导入 Token>\` 绑定查分器。
+3. 发送 \`/mai 设置查分器\`，通过按钮选择自动、水鱼或落雪。
+4. 发送 \`/mai B50\` 查询成绩，发送 \`/mai\` 查看完整功能菜单。
+
+启用落雪 OAuth 或水鱼成绩更新时，请正确配置 Koishi Server 的 \`selfUrl\` 或插件的 \`publicBaseUrl\`。
+`.trim()

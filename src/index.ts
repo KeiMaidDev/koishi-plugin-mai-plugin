@@ -41,7 +41,7 @@ import { registerMaiServerRoutes } from './server/routes'
 
 export const name = PLUGIN_NAME
 
-export { Config, ConfigSchema }
+export { Config, ConfigSchema, usage } from './config'
 export { type LifecycleContext, type LifecycleSteps }
 export * from './database/models'
 export * from './database/repositories'

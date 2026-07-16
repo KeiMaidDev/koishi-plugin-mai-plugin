@@ -18,11 +18,8 @@ const WAHLAP_MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 const WAHLAP_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/132 Safari/537.36 MicroMessenger/7.0'
 
 export class PublicCallbackUnavailableError extends Error {
-  constructor() {
-    super(
-      '未完成授权配置，请检查 oauth.enabled、authorizationUrl、clientId、clientSecret、tokenCipherKey，'
-      + '并设置 publicBaseUrl 或 Koishi Server selfUrl。',
-    )
+  constructor(message = '未完成 LXNS OAuth 配置。') {
+    super(message)
     this.name = 'PublicCallbackUnavailableError'
   }
 }
@@ -271,15 +268,17 @@ export function createKoishiWahlapRequester(http: Context['http']) {
 }
 
 function publicBaseUrl(value: string) {
-  if (!value) throw new PublicCallbackUnavailableError()
+  if (!value) {
+    throw new PublicCallbackUnavailableError('缺少 publicBaseUrl 或 Koishi Server selfUrl。')
+  }
   let url: URL
   try {
     url = new URL(value)
   } catch {
-    throw new PublicCallbackUnavailableError()
+    throw new PublicCallbackUnavailableError('publicBaseUrl 或 Koishi Server selfUrl 不是有效 URL。')
   }
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
-    throw new PublicCallbackUnavailableError()
+    throw new PublicCallbackUnavailableError('publicBaseUrl 或 Koishi Server selfUrl 必须是无账号信息的 HTTP(S) 地址。')
   }
   url.hash = ''
   url.search = ''
@@ -303,25 +302,38 @@ function validatedLxnsAuthorizationUrl(
   try {
     authorize = new URL(rawUrl.trim())
   } catch {
-    throw new PublicCallbackUnavailableError()
+    throw new PublicCallbackUnavailableError('oauth.authorizationUrl 不是有效 URL。')
   }
   const uniqueParameter = (name: string) => authorize.searchParams.getAll(name).length === 1
-  if (
-    authorize.origin !== LXNS_AUTHORIZE_ORIGIN
-    || authorize.pathname !== LXNS_AUTHORIZE_PATH
-    || authorize.username
-    || authorize.password
-    || authorize.hash
-    || !uniqueParameter('response_type')
-    || authorize.searchParams.get('response_type') !== 'code'
-    || !uniqueParameter('client_id')
-    || authorize.searchParams.get('client_id') !== clientId.trim()
-    || !uniqueParameter('redirect_uri')
-    || authorize.searchParams.get('redirect_uri') !== redirectUri
-    || !uniqueParameter('scope')
-    || !authorize.searchParams.get('scope')?.trim()
-  ) {
-    throw new PublicCallbackUnavailableError()
+  if (authorize.origin !== LXNS_AUTHORIZE_ORIGIN || authorize.pathname !== LXNS_AUTHORIZE_PATH) {
+    throw new PublicCallbackUnavailableError(
+      'oauth.authorizationUrl 必须使用 https://maimai.lxns.net/oauth/authorize。',
+    )
+  }
+  if (authorize.username || authorize.password || authorize.hash) {
+    throw new PublicCallbackUnavailableError('oauth.authorizationUrl 不能包含账号信息或 URL 片段。')
+  }
+  if (!uniqueParameter('response_type') || authorize.searchParams.get('response_type') !== 'code') {
+    throw new PublicCallbackUnavailableError('oauth.authorizationUrl 必须包含唯一的 response_type=code。')
+  }
+  if (!uniqueParameter('client_id')) {
+    throw new PublicCallbackUnavailableError('oauth.authorizationUrl 必须包含唯一的 client_id。')
+  }
+  if (authorize.searchParams.get('client_id') !== clientId.trim()) {
+    throw new PublicCallbackUnavailableError(
+      'oauth.authorizationUrl 中的 client_id 与 oauth.clientId 不一致。',
+    )
+  }
+  if (!uniqueParameter('redirect_uri')) {
+    throw new PublicCallbackUnavailableError('oauth.authorizationUrl 必须包含唯一的 redirect_uri。')
+  }
+  if (authorize.searchParams.get('redirect_uri') !== redirectUri) {
+    throw new PublicCallbackUnavailableError(
+      'oauth.authorizationUrl 中的 redirect_uri 与插件实际回调地址不一致。',
+    )
+  }
+  if (!uniqueParameter('scope') || !authorize.searchParams.get('scope')?.trim()) {
+    throw new PublicCallbackUnavailableError('oauth.authorizationUrl 必须包含非空且唯一的 scope。')
   }
   return authorize
 }
@@ -366,14 +378,17 @@ export class UpdateService {
 
   async beginLxnsOAuth(session: UpdateSessionLocator) {
     this.assertActive()
-    if (
-      !this.options.oauth.enabled
-      || !this.options.oauth.authorizationUrl.trim()
-      || !this.options.oauth.clientId.trim()
-      || !this.options.oauth.clientSecret.trim()
-      || !this.options.oauth.tokenCipherKey.trim()
-    ) {
-      throw new PublicCallbackUnavailableError()
+    const missing = [
+      !this.options.oauth.enabled && 'oauth.enabled',
+      !this.options.oauth.authorizationUrl.trim() && 'oauth.authorizationUrl',
+      !this.options.oauth.clientId.trim() && 'oauth.clientId',
+      !this.options.oauth.clientSecret.trim() && 'oauth.clientSecret',
+      !this.options.oauth.tokenCipherKey.trim() && 'oauth.tokenCipherKey',
+    ].filter((name): name is string => Boolean(name))
+    if (missing.length) {
+      throw new PublicCallbackUnavailableError(
+        `未完成 LXNS OAuth 配置，缺少或未启用：${missing.join('、')}。`,
+      )
     }
     const redirectUri = lxnsCallbackUrl(
       this.options.publicBaseUrl,

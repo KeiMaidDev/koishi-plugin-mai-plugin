@@ -134,6 +134,7 @@ export class MaimaiDataStore {
   }
 
   iconPath(id: number) {
+    if (!Number.isSafeInteger(id) || id < 1) return FALLBACK_AVATAR
     const local = this.avatars.get(id)
     if (local) return local
     const remote = this.remoteAssets?.resolve('icon', id, FALLBACK_AVATAR)
@@ -145,6 +146,7 @@ export class MaimaiDataStore {
   }
 
   platePath(id: number) {
+    if (!Number.isSafeInteger(id) || id < 1) return FALLBACK_PLATE
     const local = this.plateImages.get(id)
     if (local) return local
     const remote = this.remoteAssets?.resolve('plate', id, FALLBACK_PLATE)

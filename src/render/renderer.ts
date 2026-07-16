@@ -5,6 +5,7 @@ import type { MaimaiAssetInvalidationSource } from '../data/sync-service'
 import { Semaphore, RENDER_QUEUE_FULL_MESSAGE } from '../utils/semaphore'
 import { RenderAssetCache, resolvePackageAssetPath } from './assets'
 import { MAIMAI_RENDER_THEME } from './theme'
+import type { DebugTracer } from '../utils/debug'
 
 const REGULAR_FONT_PATH = resolvePackageAssetPath('fonts/NotoSansSC-Regular.otf')
 const BOLD_FONT_PATH = resolvePackageAssetPath('fonts/NotoSansSC-Bold.otf')
@@ -15,6 +16,7 @@ export interface TakumiRenderServiceOptions {
   concurrency?: number
   queueLimit?: number
   timeoutMs?: number
+  debug?: DebugTracer
 }
 
 export interface TakumiRenderInstrumentation {
@@ -119,6 +121,7 @@ export class TakumiRenderService {
   private readonly semaphore: Semaphore
   private readonly assetCache = new RenderAssetCache()
   private readonly timeoutMs: number
+  private readonly debug?: DebugTracer
   private initializationPromise?: Promise<void>
 
   constructor(
@@ -132,6 +135,7 @@ export class TakumiRenderService {
       throw new RangeError('Render queue limit must be a non-negative integer')
     }
     this.timeoutMs = positiveInteger(options.timeoutMs ?? 30_000, 'Render timeout')
+    this.debug = options.debug
     this.semaphore = new Semaphore(concurrency, queueLimit)
   }
 
@@ -162,21 +166,40 @@ export class TakumiRenderService {
   }
 
   clearWaitingQueue(reason?: unknown) {
+    this.debug?.event('render.queue.clear', { pending: this.semaphore.pending })
     this.semaphore.clear(reason)
   }
 
   async render(node: Node, options: RenderOptions, signal?: AbortSignal): Promise<Buffer> {
+    const requestedAt = Date.now()
+    this.debug?.event('render.queue.enter', {
+      active: this.semaphore.active,
+      pending: this.semaphore.pending,
+    })
     const abortScope = createAbortScope(signal, this.timeoutMs)
     let release: (() => void) | undefined
     try {
       await waitForStage(this.initialize(), abortScope.signal)
       throwIfAborted(abortScope.signal)
       release = await this.semaphore.acquire(abortScope.signal)
+      this.debug?.event('render.start', {
+        waitMs: Date.now() - requestedAt,
+        active: this.semaphore.active,
+        pending: this.semaphore.pending,
+      })
       await waitForStage(this.instrumentation.beforeRender?.(abortScope.signal), abortScope.signal)
       throwIfAborted(abortScope.signal)
       this.instrumentation.onRenderStart?.()
       try {
-        return await this.renderer.render(node, { ...options, signal: abortScope.signal })
+        const output = await this.renderer.render(node, { ...options, signal: abortScope.signal })
+        this.debug?.event('render.success', {
+          durationMs: Date.now() - requestedAt,
+          bytes: output.byteLength,
+        })
+        return output
+      } catch (error) {
+        this.debug?.failure('render.failure', error, { durationMs: Date.now() - requestedAt })
+        throw error
       } finally {
         this.instrumentation.onRenderEnd?.()
       }

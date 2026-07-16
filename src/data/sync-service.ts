@@ -4,6 +4,7 @@ import sharp from 'sharp'
 import type { Config } from '../config'
 import type { GameVersion, MusicInfo } from '../domain/music'
 import { resolvePackageAssetPath } from '../render/assets'
+import type { DebugTracer } from '../utils/debug'
 import { CacheStore, type CachedSnapshot } from './cache-store'
 import { LxnsAssetCache } from './lxns-assets'
 import { inspectFile, parseResourceManifest, sha256, type ResourceManifest, type ResourceManifestFile } from './manifest'
@@ -60,6 +61,7 @@ export interface MaimaiDataSyncOptions {
   logger?: DataSyncLogger
   proberDataUrl?: string
   builtinSource?: unknown | null
+  debug?: DebugTracer
 }
 
 export interface MaimaiAssetInvalidationEvent {
@@ -196,6 +198,7 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
       timeoutMs: options.config.timeoutMs,
       fetch: options.fetch,
       logger: this.logger,
+      debug: options.debug,
     })
     this.proberDataUrl = options.proberDataUrl === undefined ? DEFAULT_PROBER_DATA_URL : options.proberDataUrl
     this.builtinSource = options.builtinSource === undefined ? BUILTIN_SOURCE : options.builtinSource
@@ -385,17 +388,40 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
     }
   }
 
+  private async attemptSource(name: string, operation: () => Promise<MaimaiDataStore>) {
+    const startedAt = Date.now()
+    this.options.debug?.event('data.source.start', { source: name })
+    try {
+      const store = await operation()
+      this.options.debug?.event('data.source.success', {
+        source: name,
+        durationMs: Date.now() - startedAt,
+        revision: store.manifest.revision,
+        musics: store.musics.size,
+        icons: store.icons.size,
+        plates: store.plates.size,
+      })
+      return store
+    } catch (error) {
+      this.options.debug?.failure('data.source.failure', error, {
+        source: name,
+        durationMs: Date.now() - startedAt,
+      })
+      throw error
+    }
+  }
+
   async startup() {
     const remoteErrors: unknown[] = []
     if (this.options.config.enabled) {
       try {
-        return this.complete(await this.syncLxnsSource())
+        return this.complete(await this.attemptSource('lxns', () => this.syncLxnsSource()))
       } catch (error) {
         remoteErrors.push(error)
       }
       if (this.proberDataUrl) {
         try {
-          const store = await this.syncProberSource()
+          const store = await this.attemptSource('diving-fish', () => this.syncProberSource())
           if (remoteErrors.length) {
             this.logger.warn('[mai-plugin] LXNS data source is unavailable; using Diving Fish fallback.')
           }
@@ -406,7 +432,7 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
       }
       if (this.options.config.staticBaseUrl) {
         try {
-          return this.complete(await this.syncStaticSource())
+          return this.complete(await this.attemptSource('static', () => this.syncStaticSource()))
         } catch (error) {
           remoteErrors.push(error)
         }
@@ -415,6 +441,7 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
 
     try {
       const cached = await this.cache.loadSnapshot()
+      this.options.debug?.event('data.source.cache', { revision: cached.manifest.revision })
       if (remoteErrors.length) {
         this.logger.warn(`[mai-plugin] resource synchronization failed; using cached revision ${cached.manifest.revision}`)
       }
@@ -422,6 +449,7 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
     } catch (cacheError) {
       try {
         const store = await this.storeBuiltinSource()
+        this.options.debug?.event('data.source.builtin', { revision: store.manifest.revision })
         if (remoteErrors.length) {
           this.logger.warn('[mai-plugin] resource sources are unavailable; using builtin minimum data')
         }

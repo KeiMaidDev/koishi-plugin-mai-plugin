@@ -23,6 +23,7 @@ import type {
   ProviderResult,
   UserQuery,
 } from './types'
+import type { DebugTracer } from '../utils/debug'
 
 export interface ProviderChainOptions {
   data: MaimaiDataStore
@@ -31,6 +32,7 @@ export interface ProviderChainOptions {
     divingFish: MaimaiProvider
     lxns: MaimaiProvider
   }
+  debug?: DebugTracer
 }
 
 const exceptionPriority = [
@@ -64,11 +66,13 @@ export class ProviderChain {
   private readonly data: MaimaiDataStore
   private readonly repositories: MaiRepositories
   private readonly providers: ProviderChainOptions['providers']
+  private readonly debug?: DebugTracer
 
   constructor(options: ProviderChainOptions) {
     this.data = options.data
     this.repositories = options.repositories
     this.providers = options.providers
+    this.debug = options.debug
   }
 
   private isVirtual(user: UserQuery) {
@@ -132,12 +136,16 @@ export class ProviderChain {
   ): Promise<ProviderResult<T>> {
     const failures: ProviderError[] = []
     for (const provider of await this.selectedProviders(user)) {
+      this.debug?.event('provider.chain.attempt', { provider: provider.id })
       try {
-        return { response: await operation(provider), provider }
+        const response = await operation(provider)
+        this.debug?.event('provider.chain.success', { provider: provider.id })
+        return { response, provider }
       } catch (error) {
         const cancellation = findCancellationError(error)
         if (cancellation) throw cancellation
         const failure = this.normalizeFailure(provider, user, error)
+        this.debug?.failure('provider.chain.failure', failure, { provider: provider.id })
         failures.push(failure)
       }
     }

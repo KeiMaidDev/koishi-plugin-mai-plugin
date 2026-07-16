@@ -7,6 +7,7 @@ import { normalizeLxnsMusicId, toInternalAchievement } from '../domain/payloads'
 import { PlayerInfo, PlayerSettings, RatingResponse, RecordsResponse } from '../domain/player'
 import { Rating } from '../domain/rating'
 import type { Config } from '../config'
+import type { DebugTracer } from '../utils/debug'
 import {
   ProviderMalformedPayloadError,
   ProviderNoDataError,
@@ -190,12 +191,14 @@ export class LxnsProvider implements MaimaiProvider {
   private readonly data: MaimaiDataStore
   private readonly repositories: MaiRepositories
   private readonly now: () => Date
+  private readonly debug?: DebugTracer
 
   constructor(options: LxnsProviderOptions) {
     this.config = options.config
     this.data = options.data
     this.repositories = options.repositories
     this.now = options.now ?? (() => new Date())
+    this.debug = options.debug
     this.http = new ProviderHttpClient(this.id, options.ctx, options.logger, options)
   }
 
@@ -265,7 +268,14 @@ export class LxnsProvider implements MaimaiProvider {
   }
 
   private normalizeScores(scores: LXNSScore[]) {
-    return scores.map(score => this.toRecord(score)).filter((record): record is RecordEntry => record !== null)
+    const records = scores.map(score => this.toRecord(score)).filter((record): record is RecordEntry => record !== null)
+    this.debug?.event('provider.records.mapped', {
+      provider: this.id,
+      received: scores.length,
+      mapped: records.length,
+      dropped: scores.length - records.length,
+    })
+    return records
   }
 
   async getPlayerInfo(user: UserQuery) {

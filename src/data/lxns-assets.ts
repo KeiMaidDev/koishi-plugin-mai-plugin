@@ -1,6 +1,7 @@
 import { open, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { CacheStore } from './cache-store'
+import type { DebugTracer } from '../utils/debug'
 
 const LXNS_ASSET_ORIGIN = 'https://assets2.lxns.net'
 const LXNS_ASSET_BASE_URL = `${LXNS_ASSET_ORIGIN}/maimai`
@@ -12,6 +13,7 @@ export interface LxnsAssetCacheOptions {
   timeoutMs: number
   fetch?: typeof fetch
   logger?: { warn(message: string): void }
+  debug?: DebugTracer
 }
 
 function assetDescriptor(kind: LxnsAssetKind, id: number) {
@@ -70,10 +72,16 @@ export class LxnsAssetCache {
     let loading!: Promise<string | null>
     loading = (async () => {
       if (await existingFile(target)) {
-        if (await validAsset(target, kind)) return target
+        if (await validAsset(target, kind)) {
+          this.options.debug?.event('asset.cache.hit', { kind, id })
+          return target
+        }
+        this.options.debug?.event('asset.cache.invalid', { kind, id })
         await rm(target, { force: true })
       }
       try {
+        const startedAt = Date.now()
+        this.options.debug?.event('asset.download.start', { kind, id })
         await this.store.downloadComputed(descriptor.url, target, {
           timeoutMs: this.options.timeoutMs,
           maxBytes: kind === 'music' ? 32 * 1024 * 1024 : 8 * 1024 * 1024,
@@ -87,9 +95,15 @@ export class LxnsAssetCache {
           await rm(target, { force: true })
           throw new Error('Invalid LXNS asset contents')
         }
+        this.options.debug?.event('asset.download.success', {
+          kind,
+          id,
+          durationMs: Date.now() - startedAt,
+        })
         return target
-      } catch {
+      } catch (error) {
         if (await existingFile(target) && await validAsset(target, kind)) return target
+        this.options.debug?.failure('asset.download.failure', error, { kind, id })
         this.logger.warn(`[mai-plugin] LXNS ${kind} asset ${id} is unavailable; using local fallback.`)
         return fallback
       }

@@ -1,4 +1,5 @@
 import type { Config } from '../config'
+import type { DebugTracer } from '../utils/debug'
 import type { MaimaiDataStore } from '../data/sync-service'
 import type { MaiRepositories } from '../database/repositories'
 import { ComboStatus, MusicGenre, Rate, SyncStatus } from '../domain/enums'
@@ -252,11 +253,13 @@ export class DivingFishProvider implements MaimaiProvider {
   private readonly config: Config
   private readonly data: MaimaiDataStore
   private readonly repositories: MaiRepositories
+  private readonly debug?: DebugTracer
 
   constructor(options: DivingFishProviderOptions) {
     this.config = options.config
     this.data = options.data
     this.repositories = options.repositories
+    this.debug = options.debug
     this.http = new ProviderHttpClient(this.id, options.ctx, options.logger, options)
   }
 
@@ -303,7 +306,14 @@ export class DivingFishProvider implements MaimaiProvider {
   }
 
   private normalizeRecords(records: DivingFishRecord[]) {
-    return records.map(record => this.toRecord(record)).filter((record): record is RecordEntry => record !== null)
+    const normalized = records.map(record => this.toRecord(record)).filter((record): record is RecordEntry => record !== null)
+    this.debug?.event('provider.records.mapped', {
+      provider: this.id,
+      received: records.length,
+      mapped: normalized.length,
+      dropped: records.length - normalized.length,
+    })
+    return normalized
   }
 
   private playerOf(payload: DivingFishRatingResponse) {

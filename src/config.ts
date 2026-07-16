@@ -33,6 +33,7 @@ export interface Config {
   publicBaseUrl: string
   administrators: string[]
   compatibilityMode: boolean
+  debugMode: boolean
 }
 
 const secret = () => Schema.string().role('secret').default('')
@@ -84,6 +85,8 @@ export const ConfigSchema: Schema<Config> = Schema.object({
     .description('拥有插件管理权限的 Koishi 用户 ID 列表。'),
   compatibilityMode: Schema.boolean().default(false)
     .description('是否为 QQ 平台强制使用兼容消息，关闭富媒体交互。'),
+  debugMode: Schema.boolean().default(false)
+    .description('是否输出脱敏调试日志，用于检查数据源、查分器、素材缓存和渲染流程。'),
 })
 
 export const Config = ConfigSchema
@@ -97,4 +100,6 @@ export const usage = `
 
 请确保您的koishi处于公网可访问状态，或者配置了反向代理，确保落雪OAuth回调地址可访问。
 申请落雪OAuth客户端时，务必勾选所有应用权限范围，否则落雪查分器可能无法正常使用。
+
+测试时可临时启用 \`debugMode\`，日志会输出脱敏的数据源、查分器、素材缓存和渲染流程信息。
 `.trim()

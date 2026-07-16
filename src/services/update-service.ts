@@ -6,6 +6,7 @@ import { CallbackStore } from '../server/callback-store'
 import { resolveLxnsCallbackPath } from '../server/lxns-callback'
 import { load } from 'cheerio'
 import type { Context } from 'koishi'
+import type { DebugTracer } from '../utils/debug'
 
 const WAHLAP_ORIGIN = 'https://tgk-wcaime.wahlap.com'
 const LXNS_AUTHORIZE_ORIGIN = 'https://maimai.lxns.net'
@@ -78,6 +79,7 @@ export interface UpdateServiceOptions {
   ): Promise<DivingFishUpdateResponse>
   lxnsStates?: CallbackStore<LxnsState>
   updateTokens?: CallbackStore<DivingFishState>
+  debug?: DebugTracer
 }
 
 export interface WahlapResponse {
@@ -378,6 +380,7 @@ export class UpdateService {
 
   async beginLxnsOAuth(session: UpdateSessionLocator) {
     this.assertActive()
+    this.options.debug?.event('oauth.lxns.begin')
     const missing = [
       !this.options.oauth.enabled && 'oauth.enabled',
       !this.options.oauth.authorizationUrl.trim() && 'oauth.authorizationUrl',
@@ -400,6 +403,7 @@ export class UpdateService {
       redirectUri,
     )
     authorize.searchParams.set('state', this.lxnsStates.issue(session))
+    this.options.debug?.event('oauth.lxns.ready')
     return authorize.href
   }
 
@@ -411,6 +415,7 @@ export class UpdateService {
 
   async completeLxnsOAuth(state: string, code: string) {
     this.assertActive()
+    this.options.debug?.event('oauth.lxns.callback')
     const session = this.lxnsStates.consume(state)
     const redirectUri = lxnsCallbackUrl(
       this.options.publicBaseUrl,
@@ -419,18 +424,21 @@ export class UpdateService {
     try {
       await this.options.lxns.exchangeOAuthCode(session.userId, code, redirectUri)
     } catch (error) {
+      this.options.debug?.failure('oauth.lxns.failure', error)
       await session.send(
         '落雪授权绑定失败，请重试。',
         { retryCommand: '/mai 绑定落雪' },
       )
       throw error
     }
+    this.options.debug?.event('oauth.lxns.success')
     await session.send('落雪授权绑定成功。')
     if (session.pendingCommand) await session.replay(session.pendingCommand)
   }
 
   async beginDivingFishUpdate(session: UpdateSessionLocator) {
     this.assertActive()
+    this.options.debug?.event('update.diving-fish.begin')
     const updateRoute = publicRoute(this.options.publicBaseUrl, '/mai-plugin/update')
     if (!await this.options.bind.getImportToken(session.userId)) {
       throw new UpdateBindingRequiredError()
@@ -456,6 +464,7 @@ export class UpdateService {
 
   async completeDivingFishUpdate(token: string, callbackPath: string) {
     this.assertActive()
+    this.options.debug?.event('update.diving-fish.callback')
     const session = this.updateTokens.consume(token)
     const callbackUrl = validateCallbackUrl(callbackPath)
     const importToken = await this.options.bind.getImportToken(session.userId)
@@ -472,7 +481,11 @@ export class UpdateService {
         importToken,
       )
       await session.send(`更新成功，已更新${result.updates + result.creates}条记录。`)
+      this.options.debug?.event('update.diving-fish.success', {
+        records: result.updates + result.creates,
+      })
     } catch (error) {
+      this.options.debug?.failure('update.diving-fish.failure', error)
       await session.send('更新失败，请稍后重试。')
       throw error
     }

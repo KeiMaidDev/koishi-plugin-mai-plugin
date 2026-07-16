@@ -11,6 +11,7 @@ import {
   ProviderTimeoutError,
   ProviderTransportError,
 } from './errors'
+import type { DebugTracer } from '../utils/debug'
 
 export const PROVIDER_CONNECT_TIMEOUT_MS = 60_000
 export const PROVIDER_TOTAL_TIMEOUT_MS = 60_000
@@ -54,6 +55,7 @@ export interface ProviderOptions {
   connectTimeoutMs?: number
   totalTimeoutMs?: number
   now?: () => Date
+  debug?: DebugTracer
 }
 
 export interface MaimaiProvider {
@@ -95,18 +97,25 @@ function timeoutFromCause(provider: ProviderId, error: unknown) {
 export class ProviderHttpClient {
   private readonly connectTimeoutMs: number
   private readonly totalTimeoutMs: number
+  private readonly debug?: DebugTracer
 
   constructor(
     private readonly provider: ProviderId,
     private readonly ctx: ProviderContext,
     private readonly logger?: ProviderLogger,
-    options: { connectTimeoutMs?: number; totalTimeoutMs?: number } = {},
+    options: { connectTimeoutMs?: number; totalTimeoutMs?: number; debug?: DebugTracer } = {},
   ) {
     this.connectTimeoutMs = options.connectTimeoutMs ?? PROVIDER_CONNECT_TIMEOUT_MS
     this.totalTimeoutMs = options.totalTimeoutMs ?? PROVIDER_TOTAL_TIMEOUT_MS
+    this.debug = options.debug
   }
 
   async json<T = unknown>(request: ProviderJsonRequest) {
+    const startedAt = Date.now()
+    this.debug?.event('provider.request.start', {
+      provider: this.provider,
+      operation: request.label,
+    })
     const controller = new AbortController()
     let connected = false
     const connectTimer = setTimeout(() => {
@@ -134,15 +143,31 @@ export class ProviderHttpClient {
         },
       })
       connected = true
+      this.debug?.event('provider.request.success', {
+        provider: this.provider,
+        operation: request.label,
+        status: response.status,
+        durationMs: Date.now() - startedAt,
+      })
       return response
     } catch (error) {
       const timeout = timeoutFromCause(this.provider, error)
       if (timeout) {
+        this.debug?.failure('provider.request.failure', timeout, {
+          provider: this.provider,
+          operation: request.label,
+          durationMs: Date.now() - startedAt,
+        })
         this.logger?.warn(`[mai-plugin] ${this.provider} ${request.label} request failed (timeout).`)
         throw timeout
       }
       const cancellation = findCancellationError(error)
       if (cancellation) throw cancellation
+      this.debug?.failure('provider.request.failure', error, {
+        provider: this.provider,
+        operation: request.label,
+        durationMs: Date.now() - startedAt,
+      })
       this.logger?.warn(`[mai-plugin] ${this.provider} ${request.label} request failed (transport).`)
       if (isProviderError(error)) throw error
       throw new ProviderTransportError(this.provider)

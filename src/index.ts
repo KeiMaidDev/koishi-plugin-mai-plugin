@@ -21,6 +21,7 @@ import { TakumiGuessRenderer } from './render/guess-template'
 import {
   connectDataSyncAssetInvalidation,
   TakumiRenderService,
+  type TakumiRenderServiceOptions,
 } from './render/renderer'
 import { AliasService } from './services/alias-service'
 import { GuessService, type GuessReply, type GuessTarget } from './services/guess-service'
@@ -37,6 +38,7 @@ import {
 } from './services/update-service'
 import type { Awaitable, LifecycleContext, LifecycleSteps, PluginContext } from './types'
 import { registerMaiServerRoutes } from './server/routes'
+import { DebugTracer } from './utils/debug'
 
 export const name = PLUGIN_NAME
 
@@ -100,14 +102,23 @@ export * from './render/score-template'
 export * from './render/theme'
 export * from './utils/semaphore'
 export * from './utils/strings'
+export * from './utils/debug'
 
 export const inject = [...INJECTED_SERVICES]
 
 const noOp = () => undefined
 
+function createDebugTracer(ctx: object, enabled: boolean) {
+  const logger = (ctx as { logger?: (name: string) => { info(message: string): void } }).logger
+  return new DebugTracer(
+    enabled,
+    typeof logger === 'function' ? logger.call(ctx, PLUGIN_NAME) : { info: noOp },
+  )
+}
+
 export interface DefaultLifecycleDependencies {
   initializeDatabaseModels(ctx: Context): Awaitable<void>
-  createRenderer(options: Config['render']): TakumiRenderService
+  createRenderer(options: TakumiRenderServiceOptions): TakumiRenderService
   createDataSync(options: MaimaiDataSyncOptions): MaimaiDataSyncService
   createCommandDependencies(
     ctx: Context,
@@ -129,6 +140,7 @@ interface DefaultRuntimeState {
   commandDependencies?: CoreCommandDependencies | null
   servicesInitialized?: boolean
   routeRegistration?: { dispose(): void }
+  debug?: DebugTracer
 }
 
 const defaultRuntimeStates = new WeakMap<object, DefaultRuntimeState>()
@@ -148,6 +160,9 @@ export async function createDefaultCommandDependencies(
   if (!services.renderer) {
     throw new Error('[mai-plugin] renderer must be initialized before commands.')
   }
+  const logger = ctx.logger(PLUGIN_NAME)
+  const debug = new DebugTracer(runtime.config.debugMode, logger)
+  debug.event('plugin.services.initialize')
   const data = await services.dataSync.startup()
   const repositories = new MaiRepositories(ctx, runtime.config.oauth.tokenCipherKey)
   const providers = {
@@ -156,15 +171,19 @@ export async function createDefaultCommandDependencies(
       config: runtime.config,
       data,
       repositories,
+      logger,
+      debug,
     }),
     lxns: new LxnsProvider({
       ctx,
       config: runtime.config,
       data,
       repositories,
+      logger,
+      debug,
     }),
   }
-  const providerChain = new ProviderChain({ data, repositories, providers })
+  const providerChain = new ProviderChain({ data, repositories, providers, debug })
   let settingService: SettingService
   settingService = new SettingService(data, repositories, {
     achievementRecords: async (userId, musics) => {
@@ -210,7 +229,7 @@ export async function createDefaultCommandDependencies(
     },
     now,
     random: Math.random,
-    logger: ctx.logger(PLUGIN_NAME),
+    logger,
   })
   try {
     await guessService.restore()
@@ -246,6 +265,7 @@ export async function createDefaultCommandDependencies(
     importDivingFishRecords: (userId, records, importToken) => (
       providers.divingFish.importRecords(userId, records, importToken)
     ),
+    debug,
   })
 
   return {
@@ -297,10 +317,17 @@ export function createDefaultLifecycle(
   const state = defaultRuntimeStates.get(ctx) ?? {}
   defaultRuntimeStates.set(ctx, state)
 
+  const ensureDebug = (runtime: LifecycleContext) => {
+    state.debug ??= createDebugTracer(ctx, runtime.config.debugMode)
+    return state.debug
+  }
+
   const ensureDataSync = (runtime: LifecycleContext) => {
     state.dataSync ??= dependencies.createDataSync({
       config: runtime.config.resourceSync,
       lxnsDeveloperToken: runtime.config.developerTokens.lxns,
+      logger: ctx.logger(PLUGIN_NAME),
+      debug: ensureDebug(runtime),
     })
     return state.dataSync
   }
@@ -355,7 +382,10 @@ export function createDefaultLifecycle(
     initializeProviders: noOp,
     async initializeRenderer(runtime) {
       const dataSync = ensureDataSync(runtime)
-      state.renderer ??= dependencies.createRenderer(runtime.config.render)
+      state.renderer ??= dependencies.createRenderer({
+        ...runtime.config.render,
+        debug: ensureDebug(runtime),
+      })
       await state.renderer.initialize()
       state.disconnectInvalidation ??= connectDataSyncAssetInvalidation(dataSync, state.renderer)
     },
@@ -459,6 +489,12 @@ export async function initializePlugin(
   lifecycle?: LifecycleSteps,
 ) {
   assertRequiredServices(ctx)
+  const debug = createDebugTracer(ctx, config.debugMode)
+  debug.event('plugin.initialize', {
+    resourceSyncEnabled: config.resourceSync.enabled,
+    oauthEnabled: config.oauth.enabled,
+    compatibilityMode: config.compatibilityMode,
+  })
   const activeLifecycle = lifecycle ?? createDefaultLifecycle(ctx as Context)
 
   const runtime: LifecycleContext = {
@@ -483,7 +519,9 @@ export async function initializePlugin(
     await activeLifecycle.initializeServices(runtime)
     await activeLifecycle.initializeRoutes(runtime)
     await activeLifecycle.initializeCommands(runtime)
+    debug.event('plugin.ready')
   } catch (error) {
+    debug.failure('plugin.initialize.failure', error)
     await cleanup()
     throw error
   }

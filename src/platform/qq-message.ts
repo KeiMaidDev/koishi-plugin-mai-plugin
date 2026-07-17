@@ -213,9 +213,12 @@ function nonEmpty(value: string, field: string) {
 }
 
 function commandData(data: string) {
-  const normalized = nonEmpty(data, 'QQ command data')
-  if (/[\r\n]/u.test(normalized)) throw new TypeError('QQ command data must be a single line.')
-  return normalized
+  if (!data.trim()) throw new TypeError('QQ command data must be non-empty.')
+  if (data !== data.trimStart()) {
+    throw new TypeError('QQ command data must not begin with whitespace.')
+  }
+  if (/[\r\n]/u.test(data)) throw new TypeError('QQ command data must be a single line.')
+  return data
 }
 
 function resolveUnsupportTips(

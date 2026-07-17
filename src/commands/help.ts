@@ -42,8 +42,8 @@ export function registerHelpCommand(
         [
           {
             id: 'help-provider',
-            label: '设置查分器',
-            command: '/mai 设置查分器',
+            label: '查分设置',
+            command: '/mai 查分设置',
             enter: true,
             reply: false,
           },

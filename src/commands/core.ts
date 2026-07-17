@@ -46,12 +46,14 @@ const compatibilityPatterns = [
   /^(?:兼容模式(?:\s+.*)?|取消兼容模式|关闭兼容模式|禁用兼容模式|打开兼容模式|启用兼容模式)$/,
   /^设置头像(?:\s+.*)?$/,
   /^(?:设置牌子|设置姓名框)(?:\s+.*)?$/,
+  /^查分设置$/,
   /^设置(?:mai|b50)$/i,
   /^(?:默认|设为默认)$/,
   /^(?:更新|导)$/,
   /^绑定水鱼(?:\s+.*)?$/,
   /^绑定落雪$/,
   /^解绑落雪$/,
+  /^解绑水鱼$/,
 ] as const
 
 export function isExactCompatibilityCommand(content: string) {
@@ -103,9 +105,10 @@ export function resolveCompatibilityExecution(content: string) {
   }
   if (/^绑定落雪$/.test(normalized)) return 'mai.bind-lxns'
   if (/^解绑落雪$/.test(normalized)) return 'mai.unbind-lxns'
+  if (/^解绑水鱼$/.test(normalized)) return 'mai.unbind-diving-fish'
   if (/^(?:设置水鱼|水鱼)$/.test(normalized)) return 'mai.provider diving-fish'
   if (/^(?:设置落雪|落雪)$/.test(normalized)) return 'mai.provider lxns'
-  if (/^(?:设置mai|设置b50)$/i.test(normalized)) return 'mai.settings'
+  if (/^(?:查分设置|设置mai|设置b50)$/i.test(normalized)) return 'mai.query-settings'
   if (/^(?:默认|设为默认)$/.test(normalized)) return 'mai.default'
   if (/^(?:兼容模式(?:\s+.*)?|取消兼容模式|关闭兼容模式|禁用兼容模式|打开兼容模式|启用兼容模式)$/.test(normalized)) {
     return `mai.compatibility ${commandArgument(normalized)}`

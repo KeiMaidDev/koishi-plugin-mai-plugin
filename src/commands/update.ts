@@ -16,7 +16,11 @@ import {
 
 export type UpdateServicePort = Pick<
   UpdateService,
-  'beginDivingFishUpdate' | 'beginLxnsOAuth' | 'bindDivingFishToken' | 'unbindLxns'
+  | 'beginDivingFishUpdate'
+  | 'beginLxnsOAuth'
+  | 'bindDivingFishToken'
+  | 'unbindLxns'
+  | 'unbindDivingFish'
 >
 
 export interface UpdateCommandDependencies extends ReplyCommandDependencies {
@@ -145,6 +149,20 @@ export function registerUpdateCommands(
           }]]))
         } catch (error) {
           await updateFailure(session, dependencies, error, '/mai 解绑落雪')
+        }
+      })),
+    ctx.command('mai.unbind-diving-fish', '解绑水鱼成绩导入 Token')
+      .shortcut(/^\/mai\s+(?:解绑水鱼|unbind-diving-fish)$/iu)
+      .action(commandAction(async ({ session }) => {
+        try {
+          await dependencies.updateService.unbindDivingFish(session.userId)
+          await replyText(
+            session,
+            dependencies,
+            '水鱼成绩导入 Token 解绑成功。需要时可重新发送“/mai 绑定水鱼 <Token>”。',
+          )
+        } catch (error) {
+          await updateFailure(session, dependencies, error, '/mai 解绑水鱼')
         }
       })),
     ctx.command('mai.update', '更新水鱼成绩')

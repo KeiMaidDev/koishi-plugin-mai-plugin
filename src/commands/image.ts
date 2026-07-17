@@ -280,12 +280,13 @@ export function registerImageCommands(
       const total = Number(match[2])
       const target = match[3]?.trim() ?? ''
       let isSelf = true
+      let image: Buffer | undefined
       try {
         const user = await dependencies.queryService.getQueryParams(querySession(session), target)
         isSelf = user.isSelf !== false
         if (!filterText) {
           const { response, provider } = await dependencies.queryService.rating(user)
-          const image = await dependencies.renderer.renderRating(ratingRenderInput(
+          image = await dependencies.renderer.renderRating(ratingRenderInput(
             provider.name,
             response.player,
             response.settings,
@@ -293,40 +294,37 @@ export function registerImageCommands(
             response.newRatingList,
             total,
           ))
-          await replyMarkdownImage(session, dependencies, image, {
-            alt: `B${total}`,
-            keyboard: createRatingKeyboard(filterText, total),
-          })
-          return
+        } else {
+          const selected = filtersAndCharts(dependencies, filterText)
+          if (!selected?.musics.length) {
+            await replyText(session, dependencies, '未找到符合条件的歌曲。')
+            return
+          }
+          const { response, provider } = await dependencies.queryService.records(user, selected.musics)
+          const records = resultRecords(response, selected.filters)
+          if (!records.length) {
+            await replyText(session, dependencies, '当前条件下没有成绩。')
+            return
+          }
+          const split = splitRatingRecords(records, total)
+          image = await dependencies.renderer.renderRating(ratingRenderInput(
+            provider.name,
+            response.player,
+            response.settings,
+            split.oldRecords,
+            split.newRecords,
+            total,
+          ))
         }
-
-        const selected = filtersAndCharts(dependencies, filterText)
-        if (!selected?.musics.length) {
-          await replyText(session, dependencies, '未找到符合条件的歌曲。')
-          return
-        }
-        const { response, provider } = await dependencies.queryService.records(user, selected.musics)
-        const records = resultRecords(response, selected.filters)
-        if (!records.length) {
-          await replyText(session, dependencies, '当前条件下没有成绩。')
-          return
-        }
-        const split = splitRatingRecords(records, total)
-        const image = await dependencies.renderer.renderRating(ratingRenderInput(
-          provider.name,
-          response.player,
-          response.settings,
-          split.oldRecords,
-          split.newRecords,
-          total,
-        ))
-        await replyMarkdownImage(session, dependencies, image, {
-          alt: `B${total}`,
-          keyboard: createRatingKeyboard(filterText, total),
-        })
       } catch (error) {
         await commandFailure(session, dependencies, error, isSelf)
+        return
       }
+      if (!image) return
+      await replyMarkdownImage(session, dependencies, image, {
+        alt: `B${total}`,
+        keyboard: createRatingKeyboard(filterText, total),
+      })
     })))
 
   commands.push(ctx.command('mai.score-list [filter:string] [page:posint]', '生成成绩列表')

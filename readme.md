@@ -18,6 +18,9 @@
 - 支持落雪 OAuth 绑定及水鱼成绩导入更新。
 - QQ 平台支持原生 Markdown 和按钮，其他平台可回退到普通文本与图片。
 
+> [!NOTE]
+> QQ 平台的 B15、B25、B35、B40、B50 成绩图可通过可选的 Koishi Assets 服务获得永久公网链接。Raw Markdown 会写入 PNG 的实际尺寸，五种 Rating 图片使用统一的三按钮 keyboard；Assets 不可用或转存失败时自动回退为普通 PNG 图片。
+
 ## 安装
 
 在 Koishi 控制台的插件市场中搜索并安装：

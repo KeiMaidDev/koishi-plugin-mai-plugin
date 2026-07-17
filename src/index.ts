@@ -88,6 +88,7 @@ export * from './commands/support'
 export * from './platform/admin'
 export * from './platform/command-router'
 export * from './platform/fallback-message'
+export * from './platform/qq-markdown-image'
 export * from './platform/qq-message'
 export * from './render/assets'
 export * from './render/course-template'
@@ -104,7 +105,10 @@ export * from './utils/semaphore'
 export * from './utils/strings'
 export * from './utils/debug'
 
-export const inject = [...INJECTED_SERVICES]
+export const inject = {
+  required: [...INJECTED_SERVICES],
+  optional: ['assets'],
+}
 
 const noOp = () => undefined
 
@@ -208,6 +212,10 @@ export async function createDefaultCommandDependencies(
   const aliasService = new AliasService(data, repositories)
   const now = () => new Date()
   const queueService = new QueueService(repositories.arcade, { now })
+  const assets = (ctx as Context & {
+    assets?: { transform?: (content: string) => Promise<string> }
+  }).assets
+  const transform = assets?.transform
   const guessService = new GuessService({
     musics: data.musics,
     repository: repositories.guess,
@@ -280,6 +288,9 @@ export async function createDefaultCommandDependencies(
     settingRepository: repositories.setting,
     renderer: new TakumiMaiRenderer(services.renderer, data),
     callbackRouter: new CommandCallbackRouter(),
+    assetTransformer: typeof transform === 'function'
+      ? { transform: content => transform.call(assets, content) }
+      : undefined,
     administrators: runtime.config.administrators,
     compatibilityMode: runtime.config.compatibilityMode,
     now,

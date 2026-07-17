@@ -12,6 +12,11 @@ import {
   createQqUrlAction,
 } from '../platform/qq-message'
 import { sendReply } from '../platform/qq-message'
+import {
+  createQqMarkdownImage,
+  type AssetTransformer,
+} from '../platform/qq-markdown-image'
+import type { QqKeyboard } from '../platform/qq-message'
 import type { CommandCallbackRouter } from '../platform/command-router'
 import type { MaiRenderer } from '../render/mai-renderer'
 import type { AliasService } from '../services/alias-service'
@@ -87,6 +92,7 @@ export interface CoreCommandDependencies {
   >
   renderer: MaiRenderer
   callbackRouter: CommandCallbackRouter
+  assetTransformer?: AssetTransformer
   administrators?: readonly string[]
   compatibilityMode?: boolean
   now?: () => Date
@@ -100,6 +106,11 @@ export interface CoreCommandDependencies {
 export interface ReplyCommandDependencies {
   settingService?: Pick<SettingService, 'isCompatibilityMode'>
   compatibilityMode?: boolean
+}
+
+export interface ReplyMarkdownImageOptions {
+  alt: string
+  keyboard: QqKeyboard
 }
 
 export interface QqCommandGuidanceButton {
@@ -354,6 +365,33 @@ export async function replyImage(
     { type: 'image', data: image, mimeType: 'image/png' },
     ...(text ? [{ type: 'text' as const, text }] : []),
   ], undefined, { compatibilityMode })
+}
+
+export async function replyMarkdownImage(
+  session: ActiveCommandSession,
+  dependencies: ReplyCommandDependencies & Pick<CoreCommandDependencies, 'assetTransformer'>,
+  image: Buffer | Uint8Array,
+  options: ReplyMarkdownImageOptions,
+) {
+  const compatibilityMode = await compatibilityModeFor(session, dependencies)
+  const fallback = { type: 'image' as const, data: image, mimeType: 'image/png' }
+  if (session.platform !== 'qq' || compatibilityMode || !dependencies.assetTransformer) {
+    await sendReply(session, fallback, undefined, { compatibilityMode })
+    return
+  }
+  let rich: h
+  try {
+    rich = await createQqMarkdownImage({
+      image,
+      alt: options.alt,
+      keyboard: options.keyboard,
+      assets: dependencies.assetTransformer,
+    })
+  } catch {
+    await sendReply(session, fallback, undefined, { compatibilityMode })
+    return
+  }
+  await sendReply(session, fallback, rich, { compatibilityMode })
 }
 
 export async function replyAudio(session: ActiveCommandSession, audio: Buffer | Uint8Array) {

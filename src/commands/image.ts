@@ -5,6 +5,9 @@ import type { ChartInfo, MusicInfo, RecordEntry } from '../domain/music'
 import type { RecordsResponse } from '../domain/player'
 import { Rating } from '../domain/rating'
 import {
+  createQqButton,
+  createQqButtonRow,
+  createQqCommandAction,
   createPagedCallbackButtons,
   createQqKeyboard,
   createQqNativeMarkdown,
@@ -15,6 +18,7 @@ import type { ComboFilter } from '../query/filter-types'
 import {
   commandAction,
   replyImage,
+  replyMarkdownImage,
   replyQueryError,
   replyText,
   SCORE_LIST_PAGE_SIZE,
@@ -54,6 +58,34 @@ function resultRecords(response: RecordsResponse, filters?: readonly ComboFilter
 function ratingCounts(total: number) {
   const newCount = Math.min(15, total)
   return { newCount, oldCount: Math.max(0, total - newCount) }
+}
+
+export function ratingSelfQueryCommand(filterText: string, total: number) {
+  if (![15, 25, 35, 40, 50].includes(total)) {
+    throw new RangeError('Unsupported Rating count.')
+  }
+  const filter = filterText.trim()
+  return `/mai ${filter ? `${filter} ` : ''}b${total}`
+}
+
+export function createRatingKeyboard(filterText: string, total: number) {
+  return createQqKeyboard([createQqButtonRow([
+    createQqButton(
+      `rating-self-b${total}`,
+      '我也要查',
+      createQqCommandAction(ratingSelfQueryCommand(filterText, total), { enter: true }),
+    ),
+    createQqButton(
+      'rating-score-list',
+      '成绩列表',
+      createQqCommandAction('/mai 分数列表', { enter: true }),
+    ),
+    createQqButton(
+      'rating-settings',
+      '查分设置',
+      createQqCommandAction('/mai 查分设置', { enter: true }),
+    ),
+  ])])
 }
 
 function splitRatingRecords(records: readonly RecordEntry[], total: number) {
@@ -261,7 +293,10 @@ export function registerImageCommands(
             response.newRatingList,
             total,
           ))
-          await replyImage(session, dependencies, image)
+          await replyMarkdownImage(session, dependencies, image, {
+            alt: `B${total}`,
+            keyboard: createRatingKeyboard(filterText, total),
+          })
           return
         }
 
@@ -285,7 +320,10 @@ export function registerImageCommands(
           split.newRecords,
           total,
         ))
-        await replyImage(session, dependencies, image)
+        await replyMarkdownImage(session, dependencies, image, {
+          alt: `B${total}`,
+          keyboard: createRatingKeyboard(filterText, total),
+        })
       } catch (error) {
         await commandFailure(session, dependencies, error, isSelf)
       }

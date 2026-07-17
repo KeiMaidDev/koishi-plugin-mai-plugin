@@ -65,10 +65,13 @@ export interface UpdateServiceOptions {
   lxns: {
     exchangeOAuthCode(userId: string, code: string, redirectUri: string): Promise<unknown>
     removeOAuthToken(userId: string): Promise<void>
+    hasOAuthToken(userId: string): Promise<boolean>
   }
   bind: {
     getImportToken(userId: string): Promise<string | null>
     setImportToken(userId: string, token: string): Promise<void>
+    hasImportToken(userId: string): Promise<boolean>
+    removeImportToken(userId: string): Promise<void>
   }
   fetchAuthorizationRedirect(): Promise<string>
   fetchDivingFishRecords(callbackUrl: string): Promise<DivingFishImportRecord[]>
@@ -376,6 +379,19 @@ export class UpdateService {
     const token = rawToken.trim()
     if (!token || token.length > 512) throw new UpdateBindingRequiredError()
     await this.options.bind.setImportToken(userId, token)
+  }
+
+  async getBindingStatus(userId: string) {
+    const [lxns, divingFish] = await Promise.all([
+      this.options.lxns.hasOAuthToken(userId),
+      this.options.bind.hasImportToken(userId),
+    ])
+    return { lxns, divingFish }
+  }
+
+  async unbindDivingFish(userId: string) {
+    this.assertActive()
+    await this.options.bind.removeImportToken(userId)
   }
 
   async beginLxnsOAuth(session: UpdateSessionLocator) {

@@ -144,6 +144,15 @@ export class BindRepository {
     const [row] = await this.ctx.database.get('mai_diving_fish_bind', { id })
     return row?.importToken ?? null
   }
+
+  async hasImportToken(id: string) {
+    const rows = await this.ctx.database.get('mai_diving_fish_bind', { id })
+    return rows.length > 0
+  }
+
+  async removeImportToken(id: string) {
+    await this.ctx.database.remove('mai_diving_fish_bind', { id })
+  }
 }
 
 export class SettingRepository {
@@ -626,6 +635,11 @@ export class OAuthRepository {
       accessToken: this.cipher.decrypt(row.accessToken),
       refreshToken: this.cipher.decrypt(row.refreshToken),
     }
+  }
+
+  async exists(userId: string, provider: 'lxns' = 'lxns') {
+    const rows = await this.ctx.database.get('mai_oauth_token', { userId, provider })
+    return rows.length > 0
   }
 
   async remove(userId: string, provider: 'lxns' = 'lxns') {

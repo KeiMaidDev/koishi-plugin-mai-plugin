@@ -49,6 +49,7 @@ export interface CoreCommandDependencies {
     SettingService,
     | 'isCompatibilityMode'
     | 'getDefaultGame'
+    | 'getSettings'
     | 'setProviderPreference'
     | 'setCompatibilityMode'
     | 'setAvatar'
@@ -75,7 +76,9 @@ export interface CoreCommandDependencies {
     UpdateService,
     | 'beginDivingFishUpdate'
     | 'beginLxnsOAuth'
+    | 'getBindingStatus'
     | 'unbindLxns'
+    | 'unbindDivingFish'
     | 'bindDivingFishToken'
     | 'completeLxnsOAuth'
     | 'createUpdateRedirect'

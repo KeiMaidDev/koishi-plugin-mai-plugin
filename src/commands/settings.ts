@@ -12,20 +12,88 @@ import {
   type CoreCommandDependencies,
 } from './support'
 
-const SETTINGS_HELP = [
-  '支持以下设置：',
-  '设置头像 <头像 ID/名称>',
-  '设置牌子 <牌子 ID/名称>',
-  '设置查分器 <自动/水鱼/落雪>',
-  '兼容模式 [关闭]',
-].join('\n')
-
 const PROVIDER_PROMPT = '请选择成绩查询使用的查分器。自动模式会依次尝试可用的查分器。'
+
+export interface QuerySettingsPanelState {
+  provider: ProviderMode
+  avatar: number | null
+  plate: number | null
+  lxns: boolean
+  divingFish: boolean
+}
 
 function providerLabel(provider: ProviderMode) {
   if (provider === 'diving-fish') return '水鱼'
   if (provider === 'lxns') return '落雪'
   return '自动'
+}
+
+export function createQuerySettingsPanel(state: QuerySettingsPanelState) {
+  const text = [
+    `当前查分器：${providerLabel(state.provider)}`,
+    `头像：${state.avatar ?? '默认'}`,
+    `牌子：${state.plate ?? '默认'}`,
+    `落雪：${state.lxns ? '已绑定' : '未绑定'}`,
+    `水鱼：${state.divingFish ? '已绑定' : '未绑定'}`,
+  ].join('\n')
+  const rich = createQqCommandGuidance(text, [
+    [
+      {
+        id: 'query-settings-avatar',
+        label: '设置头像',
+        command: '/mai 设置头像 ',
+        enter: false,
+        reply: false,
+      },
+      {
+        id: 'query-settings-plate',
+        label: '设置牌子',
+        command: '/mai 设置牌子 ',
+        enter: false,
+        reply: false,
+      },
+    ],
+    [
+      {
+        id: 'query-settings-provider-auto',
+        label: '自动',
+        command: '/mai 设置查分器 自动',
+        enter: true,
+        reply: false,
+      },
+      {
+        id: 'query-settings-provider-diving-fish',
+        label: '水鱼',
+        command: '/mai 设置查分器 水鱼',
+        enter: true,
+        reply: false,
+      },
+      {
+        id: 'query-settings-provider-lxns',
+        label: '落雪',
+        command: '/mai 设置查分器 落雪',
+        enter: true,
+        reply: false,
+      },
+    ],
+    [
+      {
+        id: 'query-settings-lxns',
+        label: state.lxns ? '解绑落雪' : '绑定落雪',
+        command: state.lxns ? '/mai 解绑落雪' : '/mai 绑定落雪',
+        enter: true,
+        reply: false,
+      },
+      {
+        id: 'query-settings-diving-fish',
+        label: state.divingFish ? '解绑水鱼' : '绑定水鱼',
+        command: state.divingFish ? '/mai 解绑水鱼' : '/mai 绑定水鱼 ',
+        enter: state.divingFish,
+        reply: false,
+      },
+    ],
+  ])
+  return { text, rich }
 }
 
 function providerSelectionGuidance(text: string) {
@@ -186,10 +254,25 @@ export function registerSettingsCommands(
       }
     })))
 
-  commands.push(ctx.command('mai.settings', '显示舞萌成绩图设置')
-    .shortcut(/^\/mai\s+设置(?:mai|b50)$/i)
+  commands.push(ctx.command('mai.query-settings', '显示舞萌成绩图设置')
+    .shortcut(/^\/mai\s+查分设置$/)
+    .shortcut(/^\/mai\s+设置mai$/i)
+    .shortcut(/^\/mai\s+设置b50$/i)
     .action(commandAction(async ({ session }) => {
-      await replyText(session, dependencies, SETTINGS_HELP)
+      if (!dependencies.updateService) {
+        await settingFailure(session, dependencies, new Error('Update service is unavailable.'))
+        return
+      }
+      try {
+        const [settings, bindingStatus] = await Promise.all([
+          dependencies.settingService.getSettings(session.userId),
+          dependencies.updateService.getBindingStatus(session.userId),
+        ])
+        const panel = createQuerySettingsPanel({ ...settings, ...bindingStatus })
+        await replyText(session, dependencies, panel.text, panel.rich)
+      } catch (error) {
+        await settingFailure(session, dependencies, error)
+      }
     })))
 
   commands.push(ctx.command('mai.default', '将舞萌设为默认音游')

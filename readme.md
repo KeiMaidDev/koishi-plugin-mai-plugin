@@ -54,6 +54,8 @@ koishi-plugin-mai-plugin
 
 曲目元数据优先通过 [LXNS maimai API](https://maimai.lxns.net/docs/api/maimai) 获取。LXNS 不可用时自动切换到水鱼曲库；两个远程源都不可用时读取最近一次成功的本地快照，首次运行且没有快照时才使用内置最小数据。
 
+远端歌曲别名只从 LXNS `GET /api/v0/maimai/alias/list` 获取，水鱼不作为歌曲别名数据源。有效缓存位于 `resourceSync.cacheDir/aliases.json`；存在有效缓存时不会访问网络，当前也不会自动刷新。缓存缺失、损坏或不包含有效别名时，插件会重新拉取并原子保存；拉取或保存失败不会阻塞启动。搜索时依次匹配正式标题、远端别名和用户已批准别名。远端别名缓存流程不会写入 `mai_alias` 或 `mai_alias_vote`。
+
 封面、头像、姓名框和试听音频使用 LXNS 游戏资源站。素材仅在实际使用时下载，并持久缓存到 `resourceSync.cacheDir/assets`；已有缓存会直接复用，远程资源暂时不可用时不会覆盖本地文件。插件不会在启动时批量镜像全部素材，以避免触发官方访问频率限制。
 
 ## 调试模式
@@ -161,7 +163,7 @@ mai-plugin/
 │  └─ superpowers/       # 设计与实施记录
 ├─ src/
 │  ├─ commands/          # Koishi 命令、快捷触发词和交互引导
-│  ├─ data/              # 资源清单、缓存、标准化和同步服务
+│  ├─ data/              # 资源清单、曲目与别名缓存、标准化和同步服务
 │  ├─ database/          # 数据表声明与仓储实现
 │  ├─ domain/            # 曲目、玩家、Rating 和枚举等领域模型
 │  ├─ platform/          # QQ 富媒体、回退消息、权限与命令路由

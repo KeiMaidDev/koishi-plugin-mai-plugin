@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { open } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { MusicInfo } from '../domain/music'
 import type { DebugTracer } from '../utils/debug'
@@ -8,6 +8,7 @@ import { CacheStore } from './cache-store'
 export const LXNS_ALIAS_LIST_URL = 'https://maimai.lxns.net/api/v0/maimai/alias/list'
 export const REMOTE_ALIAS_CACHE_SCHEMA_VERSION = 1
 export const MAX_REMOTE_ALIAS_ENTRIES = 20_000
+export const MAX_REMOTE_ALIAS_NAMES = 20_000
 export const MAX_REMOTE_ALIASES_PER_MUSIC = 128
 export const MAX_REMOTE_ALIAS_CODE_POINTS = 128
 export const MAX_REMOTE_ALIAS_BYTES = 8 * 1024 * 1024
@@ -100,8 +101,13 @@ function normalizeEntries(
   }
   const result = new Map<number, string[]>()
   const normalizedNames = new Map<number, Set<string>>()
+  let sourceNameCount = 0
   for (const entry of entries) {
     const { musicId, names } = readEntry(entry)
+    sourceNameCount += names.length
+    if (sourceNameCount > MAX_REMOTE_ALIAS_NAMES) {
+      throw new RangeError('Alias names exceed the remote payload limit')
+    }
     if (!musics.has(musicId)) continue
     appendAliases(result, normalizedNames, musicId, names)
   }
@@ -203,6 +209,23 @@ function validateLxnsAliasUrl(url: URL) {
   }
 }
 
+async function readAliasJson(path: string): Promise<unknown> {
+  const handle = await open(path, 'r')
+  try {
+    const metadata = await handle.stat()
+    if (metadata.size > MAX_REMOTE_ALIAS_BYTES) {
+      throw new RangeError('Alias cache exceeds the remote byte limit')
+    }
+    const contents = await handle.readFile()
+    if (contents.byteLength > MAX_REMOTE_ALIAS_BYTES) {
+      throw new RangeError('Alias cache exceeds the remote byte limit')
+    }
+    return JSON.parse(contents.toString('utf8'))
+  } finally {
+    await handle.close()
+  }
+}
+
 export class RemoteAliasCache {
   private readonly cache: CacheStore
   private readonly logger: RemoteAliasCacheLogger
@@ -217,7 +240,7 @@ export class RemoteAliasCache {
   async startup(musics: ReadonlyMap<number, MusicInfo>): Promise<Map<number, string[]>> {
     const cachePath = join(this.options.cacheDir, 'aliases.json')
     try {
-      const cached = parseAliasCache(JSON.parse(await readFile(cachePath, 'utf8')), musics)
+      const cached = parseAliasCache(await readAliasJson(cachePath), musics)
       const counts = aliasCounts(cached)
       if (counts.aliases) {
         this.options.debug?.event('alias.cache.hit', { source: 'cache', ...counts })
@@ -237,7 +260,7 @@ export class RemoteAliasCache {
         maxBytes: MAX_REMOTE_ALIAS_BYTES,
         validateUrl: validateLxnsAliasUrl,
       })
-      const aliases = normalizeLxnsAliases(JSON.parse(await readFile(downloadedPath, 'utf8')), musics)
+      const aliases = normalizeLxnsAliases(await readAliasJson(downloadedPath), musics)
       const counts = aliasCounts(aliases)
       if (!counts.aliases) throw new Error('LXNS alias payload contains no valid aliases')
       await this.cache.writeAtomic(cachePath, serializeAliasCache(aliases, this.now().toISOString()))

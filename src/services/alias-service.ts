@@ -62,6 +62,16 @@ function tokenScore(queryTokens: string[], fields: string[]) {
   return best
 }
 
+function uniqueSearchFields(fields: string[]) {
+  const seen = new Set<string>()
+  return fields.filter(field => {
+    const normalized = normalizeSearchText(field)
+    if (!normalized || seen.has(normalized)) return false
+    seen.add(normalized)
+    return true
+  })
+}
+
 export class AliasService {
   constructor(
     private readonly data: MaimaiDataStore,
@@ -143,7 +153,11 @@ export class AliasService {
     }
     return musics.map(music => ({
       music,
-      fields: [music.name, ...(aliasesByMusic.get(music.id) ?? [])],
+      fields: uniqueSearchFields([
+        music.name,
+        ...(this.data.remoteAliases.get(music.id) ?? []),
+        ...(aliasesByMusic.get(music.id) ?? []),
+      ]),
     }))
   }
 }

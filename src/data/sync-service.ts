@@ -5,6 +5,7 @@ import type { Config } from '../config'
 import type { GameVersion, MusicInfo } from '../domain/music'
 import { resolvePackageAssetPath } from '../render/assets'
 import type { DebugTracer } from '../utils/debug'
+import { RemoteAliasCache, type RemoteAliases } from './alias-cache'
 import { CacheStore, type CachedSnapshot } from './cache-store'
 import { LxnsAssetCache } from './lxns-assets'
 import { inspectFile, parseResourceManifest, sha256, type ResourceManifest, type ResourceManifestFile } from './manifest'
@@ -62,6 +63,7 @@ export interface MaimaiDataSyncOptions {
   proberDataUrl?: string
   builtinSource?: unknown | null
   debug?: DebugTracer
+  now?: () => Date
 }
 
 export interface MaimaiAssetInvalidationEvent {
@@ -100,6 +102,7 @@ export class MaimaiDataStore {
   private readonly coverThumbnails = new Map<number, string>()
   private readonly avatars = new Map<number, string>()
   private readonly plateImages = new Map<number, string>()
+  private _remoteAliases: RemoteAliases = new Map()
   readonly assetPaths: readonly string[]
 
   constructor(
@@ -156,6 +159,14 @@ export class MaimaiDataStore {
   previewPath(resourceId: number) {
     return this.remoteAssets?.resolve('music', resourceId)
   }
+
+  get remoteAliases(): RemoteAliases {
+    return this._remoteAliases
+  }
+
+  setRemoteAliases(aliases: RemoteAliases) {
+    this._remoteAliases = aliases
+  }
 }
 
 function createRemoteUrlValidator(allowedHosts: string[]) {
@@ -189,6 +200,7 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
   private readonly builtinSource: unknown | null
   private readonly validateRemoteUrl: (url: URL) => void
   private readonly assets: LxnsAssetCache
+  private readonly aliases: RemoteAliasCache
   private readonly assetInvalidationListeners = new Set<MaimaiAssetInvalidationListener>()
   private publishedAssetPaths = new Set<string>()
 
@@ -202,6 +214,14 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
       logger: this.logger,
       debug: options.debug,
     })
+    this.aliases = new RemoteAliasCache({
+      cacheDir: options.config.cacheDir,
+      timeoutMs: options.config.timeoutMs,
+      fetch: options.fetch,
+      logger: this.logger,
+      debug: options.debug,
+      now: options.now,
+    })
     this.proberDataUrl = options.proberDataUrl === undefined ? DEFAULT_PROBER_DATA_URL : options.proberDataUrl
     this.builtinSource = options.builtinSource === undefined ? BUILTIN_SOURCE : options.builtinSource
     this.validateRemoteUrl = createRemoteUrlValidator(options.config.allowedHosts)
@@ -214,7 +234,8 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
     }
   }
 
-  private complete(store: MaimaiDataStore) {
+  private async complete(store: MaimaiDataStore) {
+    store.setRemoteAliases(await this.aliases.startup(store.musics))
     const currentPaths = new Set(store.assetPaths)
     const affectedPaths = Object.freeze([...new Set([
       ...this.publishedAssetPaths,
@@ -417,7 +438,7 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
     const remoteErrors: unknown[] = []
     if (this.options.config.enabled) {
       try {
-        return this.complete(await this.attemptSource('lxns', () => this.syncLxnsSource()))
+        return await this.complete(await this.attemptSource('lxns', () => this.syncLxnsSource()))
       } catch (error) {
         remoteErrors.push(error)
       }
@@ -427,14 +448,14 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
           if (remoteErrors.length) {
             this.logger.warn('[mai-plugin] LXNS data source is unavailable; using Diving Fish fallback.')
           }
-          return this.complete(store)
+          return await this.complete(store)
         } catch (error) {
           remoteErrors.push(error)
         }
       }
       if (this.options.config.staticBaseUrl) {
         try {
-          return this.complete(await this.attemptSource('static', () => this.syncStaticSource()))
+          return await this.complete(await this.attemptSource('static', () => this.syncStaticSource()))
         } catch (error) {
           remoteErrors.push(error)
         }
@@ -447,7 +468,7 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
       if (remoteErrors.length) {
         this.logger.warn(`[mai-plugin] resource synchronization failed; using cached revision ${cached.manifest.revision}`)
       }
-      return this.complete(await this.storeFromCache(cached))
+      return await this.complete(await this.storeFromCache(cached))
     } catch (cacheError) {
       try {
         const store = await this.storeBuiltinSource()
@@ -455,7 +476,7 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
         if (remoteErrors.length) {
           this.logger.warn('[mai-plugin] resource sources are unavailable; using builtin minimum data')
         }
-        return this.complete(store)
+        return await this.complete(store)
       } catch (builtinError) {
         throw new MissingMaimaiDataError(
           ['versions', 'musics'],

@@ -10,6 +10,7 @@ export const REMOTE_ALIAS_CACHE_SCHEMA_VERSION = 1
 export const MAX_REMOTE_ALIAS_ENTRIES = 20_000
 export const MAX_REMOTE_ALIAS_NAMES = 20_000
 export const MAX_REMOTE_ALIAS_SOURCE_CODE_POINTS = 256_000
+export const MAX_REMOTE_ALIAS_NORMALIZED_CODE_POINTS = 256_000
 export const MAX_REMOTE_ALIASES_PER_MUSIC = 128
 export const MAX_REMOTE_ALIAS_CODE_POINTS = 128
 export const MAX_REMOTE_ALIAS_BYTES = 8 * 1024 * 1024
@@ -67,18 +68,16 @@ function appendAliases(
   result: Map<number, string[]>,
   normalizedNames: Map<number, Set<string>>,
   musicId: number,
-  sourceNames: string[],
+  sourceNames: readonly { name: string, normalized: string }[],
 ) {
   const names = result.get(musicId) ?? []
   const seen = normalizedNames.get(musicId) ?? new Set<string>()
-  for (const sourceName of sourceNames) {
-    const name = sourceName.trim()
+  for (const { name, normalized } of sourceNames) {
     if (
       !name
       || CONTROL_CHARACTERS.test(name)
       || [...name].length > MAX_REMOTE_ALIAS_CODE_POINTS
     ) continue
-    const normalized = normalizeSearchText(name)
     if (!normalized || seen.has(normalized)) continue
     if (names.length >= MAX_REMOTE_ALIASES_PER_MUSIC) {
       throw new RangeError('Aliases exceed the per-music limit')
@@ -104,22 +103,33 @@ function normalizeEntries(
   const normalizedNames = new Map<number, Set<string>>()
   let sourceNameCount = 0
   let sourceCodePointCount = 0
+  let normalizedCodePointCount = 0
   for (const entry of entries) {
     const { musicId, names } = readEntry(entry)
     sourceNameCount += names.length
     if (sourceNameCount > MAX_REMOTE_ALIAS_NAMES) {
       throw new RangeError('Alias names exceed the remote payload limit')
     }
-    for (const name of names) {
-      for (const _codePoint of name) {
+    const preparedNames = []
+    for (const sourceName of names) {
+      for (const _codePoint of sourceName) {
         sourceCodePointCount++
         if (sourceCodePointCount > MAX_REMOTE_ALIAS_SOURCE_CODE_POINTS) {
           throw new RangeError('Alias names exceed the remote code point budget')
         }
       }
+      const name = sourceName.trim()
+      const normalized = normalizeSearchText(name)
+      for (const _codePoint of normalized) {
+        normalizedCodePointCount++
+        if (normalizedCodePointCount > MAX_REMOTE_ALIAS_NORMALIZED_CODE_POINTS) {
+          throw new RangeError('Alias names exceed the normalized search text budget')
+        }
+      }
+      preparedNames.push({ name, normalized })
     }
     if (!musics.has(musicId)) continue
-    appendAliases(result, normalizedNames, musicId, names)
+    appendAliases(result, normalizedNames, musicId, preparedNames)
   }
   return result
 }

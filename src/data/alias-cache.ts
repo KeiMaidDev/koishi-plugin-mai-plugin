@@ -77,7 +77,7 @@ function appendAliases(
       || [...name].length > MAX_REMOTE_ALIAS_CODE_POINTS
     ) continue
     const normalized = normalizeSearchText(name)
-    if (seen.has(normalized)) continue
+    if (!normalized || seen.has(normalized)) continue
     if (names.length >= MAX_REMOTE_ALIASES_PER_MUSIC) {
       throw new RangeError('Aliases exceed the per-music limit')
     }

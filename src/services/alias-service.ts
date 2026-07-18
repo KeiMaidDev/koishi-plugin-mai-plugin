@@ -100,7 +100,7 @@ export class AliasService {
 
     const documents = await this.documents(musics)
     const exactAliases = documents
-      .filter(document => document.fields.slice(1).some(alias => normalizeSearchText(alias) === query))
+      .filter(document => document.fields.some(alias => normalizeSearchText(alias) === query))
       .map(document => document.music)
       .sort(byMusicId)
     if (exactAliases.length) return exactAliases

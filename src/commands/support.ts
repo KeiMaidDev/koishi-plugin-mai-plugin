@@ -41,6 +41,7 @@ export interface CoreCommandData {
   courses: ReadonlyMap<number, CourseInfo>
   icons: ReadonlyMap<number, IconInfo>
   plates: ReadonlyMap<number, PlateInfo>
+  coverPath(resourceId: number, thumbnail?: boolean): string | Promise<string>
 }
 
 export interface CoreCommandDependencies {

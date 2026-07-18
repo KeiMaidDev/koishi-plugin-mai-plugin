@@ -88,6 +88,27 @@ export function createRatingKeyboard(filterText: string, total: number) {
   ])])
 }
 
+function createSongRatingKeyboard(music: MusicInfo, chart: ChartInfo) {
+  const query = `${chart.difficulty.brief}id${music.id}`
+  return createQqKeyboard([createQqButtonRow([
+    createQqButton(
+      'song-rating-self',
+      '我也要查',
+      createQqCommandAction(`/mai 歌50 ${query}`, { enter: true }),
+    ),
+    createQqButton(
+      'song-rating-score',
+      '单曲成绩',
+      createQqCommandAction(`/mai info ${music.id}`, { enter: true }),
+    ),
+    createQqButton(
+      'song-rating-settings',
+      '查分设置',
+      createQqCommandAction('/mai 查分设置', { enter: true }),
+    ),
+  ])])
+}
+
 function splitRatingRecords(records: readonly RecordEntry[], total: number) {
   const counts = ratingCounts(total)
   return {
@@ -265,6 +286,21 @@ async function songByAlias(
   return (await dependencies.aliasService.search(raw.trim()))[0]
 }
 
+function parseSongRatingQuery(raw: string) {
+  const match = raw.trim().match(/^(?:(绿谱?|黄谱?|红谱?|紫谱?|白谱?|Basic|Advanced|Expert|Master|ReMaster)\s*)?(.+)$/i)
+  if (!match) return null
+  const difficultyName = match[1]?.replace('谱', '').toLocaleLowerCase()
+  return {
+    difficulty: difficultyName
+      ? MusicDifficulty.values.find(entry => (
+        entry.name.toLocaleLowerCase() === difficultyName
+        || entry.names.some(name => name.toLocaleLowerCase() === difficultyName)
+      ))
+      : undefined,
+    query: match[2].trim(),
+  }
+}
+
 export function registerImageCommands(
   ctx: Context,
   dependencies: CoreCommandDependencies,
@@ -325,6 +361,61 @@ export function registerImageCommands(
         alt: `B${total}`,
         keyboard: createRatingKeyboard(filterText, total),
       })
+    })))
+
+  commands.push(ctx.command('mai.song-rating <query:text>', '将同一首歌填充为歌50成绩图')
+    .shortcut(/^\/mai\s+歌50\s+(.+)$/i, { args: ['$1'] })
+    .action(commandAction(async ({ session }, raw) => {
+      const parsed = parseSongRatingQuery(raw)
+      const music = parsed?.query ? await songByAlias(dependencies, parsed.query) : undefined
+      if (!parsed || !music) {
+        await replyText(session, dependencies, '使用方法：歌50 (难度)id/名称/别名')
+        return
+      }
+      let isSelf = true
+      try {
+        const user = await dependencies.queryService.getQueryParams(querySession(session))
+        isSelf = user.isSelf !== false
+        const [{ response: rating, provider }, { response: records }] = await Promise.all([
+          dependencies.queryService.rating(user),
+          dependencies.queryService.record(user, music),
+        ])
+        const record = parsed.difficulty
+          ? records.find(entry => entry.chart.difficulty === parsed.difficulty)
+          : [...records]
+            .filter(entry => entry.achievement > 0)
+            .sort((left, right) => right.chart.difficulty.value - left.chart.difficulty.value)[0]
+        if (!record) {
+          await replyText(
+            session,
+            dependencies,
+            parsed.difficulty ? '未查询到该歌曲该难度的游玩记录。' : '未查询到该歌曲的游玩记录。',
+          )
+          return
+        }
+        const oldRecords = Array.from({ length: 35 }, () => record)
+        const newRecords = Array.from({ length: 15 }, () => record)
+        const totalRating = record.rating * 50
+        const image = await dependencies.renderer.renderRating({
+          backend: provider.name,
+          player: rating.player,
+          settings: rating.settings,
+          oldRecords,
+          newRecords,
+          oldCount: oldRecords.length,
+          newCount: newRecords.length,
+          rating: totalRating,
+          title: `[${provider.name}] 歌50 ${record.chart.difficulty.brief}${music.id}. ${music.name} × 50 = ${totalRating}`,
+          oldLabel: 'SONG 35',
+          newLabel: 'SONG 15',
+        })
+        await replyMarkdownImage(session, dependencies, image, {
+          alt: 'B50',
+          keyboard: createSongRatingKeyboard(music, record.chart),
+        })
+      } catch (error) {
+        await commandFailure(session, dependencies, error, isSelf)
+      }
     })))
 
   commands.push(ctx.command('mai.score-list [filter:string] [page:posint]', '生成成绩列表')

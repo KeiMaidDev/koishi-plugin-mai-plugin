@@ -1,12 +1,22 @@
 import type { Command, Context } from 'koishi'
+import { readFile } from 'node:fs/promises'
+import { extname } from 'node:path'
 import { Worker } from 'node:worker_threads'
+import { lxnsAssetUrl } from '../data/lxns-assets'
 import { MusicDifficulty } from '../domain/enums'
 import type { ChartInfo, MusicInfo } from '../domain/music'
 import { isAdministrator } from '../platform/admin'
 import {
   createPagedCallbackButtons,
+  createInlineCommandLink,
+  createQqButton,
+  createQqButtonRow,
+  createQqCommandAction,
   createQqKeyboard,
   createQqNativeMarkdown,
+  createQqUrlAction,
+  sendReply,
+  type QqButtonRow,
 } from '../platform/qq-message'
 import { filterCharts, filterMusics } from '../query/combo-executor'
 import { parseComboQuery } from '../query/combo-parser'
@@ -14,6 +24,7 @@ import { Semaphore } from '../utils/semaphore'
 import {
   MAX_USER_REGEX_LENGTH,
   commandAction,
+  compatibilityModeFor,
   replyAudio,
   replyText,
   SEARCH_PAGE_SIZE,
@@ -58,10 +69,218 @@ function isChart(result: MusicSearchResult): result is ChartInfo {
 }
 
 function formatMusic(music: MusicInfo, chart?: ChartInfo) {
-  if (!chart) {
-    return `${music.id}. ${music.name}\n曲师：${music.artist}\nBPM：${music.bpm}`
+  return chart ? formatChartText(chart) : formatMusicText(music)
+}
+
+function fitLevel(chart: ChartInfo) {
+  return chart.fitLevelValue ? chart.fitLevelValue.toFixed(1) : '-'
+}
+
+function chartDesigner(chart: ChartInfo) {
+  return chart.notesDesigner.trim() || '-'
+}
+
+function formatMusicText(music: MusicInfo) {
+  return [
+    `${music.id}. ${music.name}`,
+    `艺术家：${music.artist}`,
+    `分类：${music.genre.genreName}`,
+    `版本：${music.version.name}${music.isNew ? ' (计入 B15)' : ''}`,
+    `BPM：${music.bpm}`,
+    `定数：${music.charts.map(chart => chart.levelValue.toFixed(1)).join('/')}`,
+    `拟合定数：${music.charts.map(fitLevel).join('/')}`,
+    `谱师：${music.charts.map(chartDesigner).join('/')}`,
+  ].join('\n')
+}
+
+function formatChartText(chart: ChartInfo) {
+  const { music, notes } = chart
+  return [
+    `${chart.difficulty.brief}${music.id}. ${music.name}`,
+    `曲师：${music.artist}`,
+    `分类：${music.genre.genreName}`,
+    `版本：${music.version.name}`,
+    `BPM：${music.bpm}`,
+    `等级：${chart.level} (${chart.levelValue.toFixed(1)})`,
+    `谱师：${chartDesigner(chart)}`,
+    ...(chart.fitLevelValue ? [`拟合定数：${fitLevel(chart)}`] : []),
+    `TAP：${notes.tap}`,
+    `HOLD：${notes.hold}`,
+    `SLIDE：${notes.slide}`,
+    `BREAK：${notes.break}`,
+    ...(notes.touch ? [`TOUCH：${notes.touch}`] : []),
+    `总物量：${notes.total}`,
+    `总 DX 分：${chart.maxDeluxeScore}`,
+  ].join('\n')
+}
+
+function commandLink(label: string, command: string) {
+  return createInlineCommandLink(label || '-', command)
+}
+
+function jacketMarkdown(music: MusicInfo, size: number, alt = '封面') {
+  return `![${alt} #${size}px #${size}px](${lxnsAssetUrl('jacket', music.resourceId)})`
+}
+
+function difficultyLabel(difficulty: MusicDifficulty) {
+  const icon = difficulty === MusicDifficulty.Basic ? '🟩'
+    : difficulty === MusicDifficulty.Advanced ? '🟨'
+      : difficulty === MusicDifficulty.Expert ? '🟥'
+        : difficulty === MusicDifficulty.Master ? '🟪'
+          : difficulty === MusicDifficulty.ReMaster ? '⬜'
+            : '🟫'
+  return `${icon}${difficulty.brief}`
+}
+
+function chunkRows<T>(values: readonly T[], size: number) {
+  const chunks: T[][] = []
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size))
   }
-  return `[${chart.difficulty.brief}] ${music.id}. ${music.name}\n定数：${chart.levelValue.toFixed(1)}\n谱师：${chart.notesDesigner}`
+  return chunks
+}
+
+function musicKeyboard(music: MusicInfo) {
+  const rows: QqButtonRow[] = chunkRows(music.charts, 5).map((charts, rowIndex) => (
+    createQqButtonRow(charts.map((chart, columnIndex) => createQqButton(
+      `music-level-${rowIndex}-${columnIndex}`,
+      difficultyLabel(chart.difficulty),
+      createQqCommandAction(`/mai ${chart.difficulty.brief}id${music.id}`, { enter: true }),
+    )))
+  ))
+  rows.push(createQqButtonRow([
+    createQqButton(
+      'music-score',
+      '查成绩',
+      createQqCommandAction(`/mai info ${music.id}`, { enter: true }),
+    ),
+    createQqButton(
+      'music-song-rating',
+      '歌50',
+      createQqCommandAction(`/mai 歌50 ${music.id}`, { enter: true }),
+    ),
+  ]))
+  rows.push(createQqButtonRow([
+    createQqButton(
+      'music-preview',
+      '试听一下',
+      createQqCommandAction(`/mai 预览 id${music.id}`, { enter: true }),
+      0,
+    ),
+    createQqButton(
+      'music-alias',
+      '添加别名',
+      createQqCommandAction(`/mai 添加别名 ${music.id} `, {
+        enter: false,
+        unsupportTips: '请在命令末尾补充别名后发送。',
+      }),
+      0,
+    ),
+  ]))
+  return createQqKeyboard(rows)
+}
+
+function chartKeyboard(chart: ChartInfo) {
+  const chartId = chart.difficulty === MusicDifficulty.Utage
+    ? chart.music.resourceId + 100_000
+    : chart.music.resourceId
+  const difficulty = chart.difficulty === MusicDifficulty.Utage ? 0 : chart.difficulty.value
+  return createQqKeyboard([createQqButtonRow([createQqButton(
+    'chart-preview',
+    '谱面确认',
+    createQqUrlAction(`https://otmdb.cn/jump/maimai_chart?chart_id=${chartId}&difficulty=${difficulty}`),
+  )])])
+}
+
+function formatMusicMarkdown(music: MusicInfo) {
+  const constants = music.charts.map(chart => (
+    commandLink(chart.levelValue.toFixed(1), `/mai 定数查歌 ${chart.levelValue.toFixed(1)}`)
+  )).join('/')
+  const fits = music.charts.map(chart => chart.fitLevelValue
+    ? commandLink(fitLevel(chart), `/mai 拟合定数查歌 ${fitLevel(chart)}`)
+    : '-').join('/')
+  const designers = music.charts.map(chart => {
+    const designer = chartDesigner(chart)
+    return designer === '-' ? designer : commandLink(designer, `/mai 谱师查歌 ${designer}`)
+  }).join('/')
+  return [
+    jacketMarkdown(music, 190),
+    `**${music.id}. ${music.name}**`,
+    `**曲师：** ${commandLink(music.artist, `/mai 曲师查歌 ${music.artist}`)}`,
+    `**分类：** ${commandLink(music.genre.genreName, `/mai 搜索 ${music.genre.genreName}`)}`,
+    `**版本：** ${commandLink(music.version.name, `/mai 版本查歌 ${music.version.name}`)}${music.isNew ? ' (计入 B15)' : ''}`,
+    `**BPM：** ${commandLink(String(music.bpm), `/mai BPM查歌 ${music.bpm}`)}`,
+    `**定数：** ${constants}`,
+    `**谱师：** ${designers}`,
+    `**拟合定数：** ${fits}`,
+  ].join('\n')
+}
+
+function formatChartMarkdown(chart: ChartInfo) {
+  const { music, notes } = chart
+  const designer = chartDesigner(chart)
+  return [
+    jacketMarkdown(music, 190),
+    `**${chart.difficulty.brief}${music.id}. ${music.name}**`,
+    `**曲师：** ${commandLink(music.artist, `/mai 曲师查歌 ${music.artist}`)}`,
+    `**分类：** ${commandLink(music.genre.genreName, `/mai 搜索 ${music.genre.genreName}`)}`,
+    `**版本：** ${commandLink(music.version.name, `/mai 版本查歌 ${music.version.name}`)}`,
+    `**BPM：** ${commandLink(String(music.bpm), `/mai BPM查歌 ${music.bpm}`)}`,
+    `**等级：** ${chart.level} (${commandLink(chart.levelValue.toFixed(1), `/mai 定数查歌 ${chart.levelValue.toFixed(1)}`)})`,
+    `**谱师：** ${designer === '-' ? designer : commandLink(designer, `/mai 谱师查歌 ${designer}`)}`,
+    ...(chart.fitLevelValue ? [
+      `**拟合定数：** ${commandLink(fitLevel(chart), `/mai 拟合定数查歌 ${fitLevel(chart)}`)}`,
+    ] : []),
+    '',
+    `> **TAP：** ${notes.tap}`,
+    `> **HOLD：** ${notes.hold}`,
+    `> **SLIDE：** ${notes.slide}`,
+    `> **BREAK：** ${notes.break}`,
+    ...(notes.touch ? [`> **TOUCH：** ${notes.touch}`] : []),
+    `> **总物量：** ${notes.total}`,
+    `> **总 DX 分：** ${chart.maxDeluxeScore}`,
+  ].join('\n')
+}
+
+async function loadCover(dependencies: CoreCommandDependencies, music: MusicInfo) {
+  try {
+    const path = await dependencies.data.coverPath(music.resourceId)
+    const extension = extname(path).toLocaleLowerCase()
+    return {
+      data: await readFile(path),
+      mimeType: extension === '.jpg' || extension === '.jpeg'
+        ? 'image/jpeg'
+        : extension === '.webp'
+          ? 'image/webp'
+          : 'image/png',
+    }
+  } catch {
+    return null
+  }
+}
+
+async function replyMusicDetails(
+  session: ActiveCommandSession,
+  dependencies: CoreCommandDependencies,
+  music: MusicInfo,
+  chart?: ChartInfo,
+) {
+  const text = chart ? formatChartText(chart) : formatMusicText(music)
+  const compatibilityMode = await compatibilityModeFor(session, dependencies)
+  const cover = session.platform === 'qq' && !compatibilityMode
+    ? null
+    : await loadCover(dependencies, music)
+  const fallback = [
+    ...(cover ? [{ type: 'image' as const, ...cover }] : []),
+    { type: 'text' as const, text },
+  ]
+  const rich = createQqNativeMarkdown(
+    chart ? formatChartMarkdown(chart) : formatMusicMarkdown(music),
+    chart ? chartKeyboard(chart) : musicKeyboard(music),
+  )
+  await sendReply(session, fallback, rich, {
+    compatibilityMode,
+  })
 }
 
 function resultLine(result: MusicSearchResult) {
@@ -76,11 +295,25 @@ function pageText(results: readonly MusicSearchResult[], page: number) {
   const currentPage = Math.min(Math.max(1, page), totalPages)
   const start = (currentPage - 1) * SEARCH_PAGE_SIZE
   const lines = results.slice(start, start + SEARCH_PAGE_SIZE).map(resultLine)
+  const hint = totalPages > 1
+    ? `您要查找的歌曲可能是 (${currentPage} / ${totalPages})：`
+    : '您要查找的歌曲可能是：'
   return {
     currentPage,
     totalPages,
-    text: `${currentPage} / ${totalPages}\n${lines.join('\n')}`,
+    text: `${hint}\n${lines.join('\n')}`,
   }
+}
+
+function resultMarkdown(result: MusicSearchResult) {
+  const music = isChart(result) ? result.music : result
+  const label = isChart(result)
+    ? `${result.difficulty.brief}${music.id}. ${music.name}`
+    : `${music.id}. ${music.name}`
+  const command = isChart(result)
+    ? `/mai ${result.difficulty.brief}id${music.id}`
+    : `/mai id${music.id}`
+  return `${jacketMarkdown(music, 20, 'preview')} ${createInlineCommandLink(label, command)}`
 }
 
 function createSearchPage(
@@ -91,6 +324,12 @@ function createSearchPage(
   channelId: string,
 ) {
   const view = pageText(results, page)
+  const start = (view.currentPage - 1) * SEARCH_PAGE_SIZE
+  const markdown = [
+    `**${view.text.slice(0, view.text.indexOf('\n'))}**`,
+    '',
+    ...results.slice(start, start + SEARCH_PAGE_SIZE).map(resultMarkdown),
+  ].join('\n')
   const callbackData = (targetPage: number) => dependencies.callbackRouter.registerPagination({
     payload: { mode: 'search', query, page: targetPage },
     expectedChannelId: channelId,
@@ -110,7 +349,7 @@ function createSearchPage(
   return {
     ...view,
     rich: createQqNativeMarkdown(
-      view.text,
+      markdown,
       row.buttons.length ? createQqKeyboard([row]) : undefined,
     ),
   }
@@ -133,11 +372,7 @@ async function showResults(
   }
   if (results.length === 1) {
     const result = results[0]
-    await replyText(
-      session,
-      dependencies,
-      isChart(result) ? formatMusic(result.music, result) : formatMusic(result),
-    )
+    await replyMusicDetails(session, dependencies, isChart(result) ? result.music : result, isChart(result) ? result : undefined)
     return
   }
 
@@ -317,11 +552,11 @@ export function registerMusicCommands(
       const chart = difficulty
         ? music.charts.find(entry => entry.difficulty === difficulty)
         : undefined
-      await replyText(
-        session,
-        dependencies,
-        difficulty && !chart ? '未找到该歌曲或难度。' : formatMusic(music, chart),
-      )
+      if (difficulty && !chart) {
+        await replyText(session, dependencies, '未找到该歌曲或难度。')
+        return
+      }
+      await replyMusicDetails(session, dependencies, music, chart)
     })))
 
   commands.push(registerTextShortcut(
@@ -340,7 +575,7 @@ export function registerMusicCommands(
       }
       const random = dependencies.random?.() ?? Math.random()
       const index = Math.min(musics.length - 1, Math.floor(Math.max(0, random) * musics.length))
-      await replyText(session, dependencies, formatMusic(musics[index]))
+      await replyMusicDetails(session, dependencies, musics[index])
     },
   ))
 

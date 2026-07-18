@@ -8,6 +8,12 @@ const LXNS_ASSET_BASE_URL = `${LXNS_ASSET_ORIGIN}/maimai`
 
 export type LxnsAssetKind = 'jacket' | 'icon' | 'plate' | 'music'
 
+export function lxnsAssetUrl(kind: LxnsAssetKind, id: number) {
+  if (!Number.isSafeInteger(id) || id < 1) throw new RangeError(`Invalid LXNS ${kind} asset id: ${id}`)
+  const extension = kind === 'music' ? 'mp3' : 'png'
+  return `${LXNS_ASSET_BASE_URL}/${kind}/${id}.${extension}`
+}
+
 export interface LxnsAssetCacheOptions {
   cacheDir: string
   timeoutMs: number
@@ -17,11 +23,10 @@ export interface LxnsAssetCacheOptions {
 }
 
 function assetDescriptor(kind: LxnsAssetKind, id: number) {
-  if (!Number.isSafeInteger(id) || id < 1) throw new RangeError(`Invalid LXNS ${kind} asset id: ${id}`)
   const extension = kind === 'music' ? 'mp3' : 'png'
   return {
     relativePath: join('assets', kind, `${id}.${extension}`),
-    url: `${LXNS_ASSET_BASE_URL}/${kind}/${id}.${extension}`,
+    url: lxnsAssetUrl(kind, id),
   }
 }
 

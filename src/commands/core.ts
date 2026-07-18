@@ -36,6 +36,7 @@ const compatibilityPatterns = [
   /^(?:.*?)定数表$/,
   /^(?:.*?)(?:完成表|进度表|未完成表|未完成列表)$/,
   /^(?:info|minfo)\s+.+$/i,
+  /^歌50\s+.+$/i,
   /^(?:绿谱?|黄谱?|红谱?|紫谱?|白谱?)成绩\s+.+$/,
   /^段位表(?:\s+.*)?$/,
   /^.+?进度(?:\s+.*)?$/,
@@ -140,6 +141,9 @@ export function resolveCompatibilityExecution(content: string) {
   }
   if ((match = normalized.match(/^(?:info|minfo)\s+(.+)$/i))) {
     return `mai.song-score ${commandArgument(match[1])}`
+  }
+  if ((match = normalized.match(/^歌50\s+(.+)$/i))) {
+    return `mai.song-rating ${commandArgument(match[1])}`
   }
   if ((match = normalized.match(/^(绿谱?|黄谱?|红谱?|紫谱?|白谱?)成绩\s+(.+)$/))) {
     return `mai.song-score ${commandArgument(match[2])} --difficulty ${commandArgument(match[1])}`

@@ -56,12 +56,13 @@ export interface NormalizedMaimaiSource {
 
 type UnknownRecord = Record<string, unknown>
 
-interface DivingFishChartMetadata {
+export interface DivingFishChartMetadata {
   musicId: number
   charts: Array<{
     difficulty: number
     notes: [number, number, number, number, number]
     notesDesigner: string
+    fitLevelValue: number
   }>
 }
 
@@ -157,7 +158,32 @@ function integerList(value: unknown, path: string) {
   return array(value, path).map((entry, index) => integer(entry, `${path}[${index}]`, 1))
 }
 
-export function extractDivingFishChartMetadata(value: unknown): DivingFishChartMetadata[] {
+function divingFishFitLevels(value: unknown) {
+  if (value === undefined || value === null) return new Map<number, number[]>()
+  const input = record(value, 'divingFishChartStats')
+  const charts = record(input.charts, 'divingFishChartStats.charts')
+  const result = new Map<number, number[]>()
+  for (const [idText, entries] of Object.entries(charts)) {
+    if (!/^\d+$/.test(idText)) {
+      throw new TypeError('divingFishChartStats.charts contains an invalid music ID')
+    }
+    const values = array(entries, `divingFishChartStats.charts.${idText}`).map((entry, index) => {
+      const path = `divingFishChartStats.charts.${idText}[${index}]`
+      const chart = record(entry, path)
+      return chart.fit_diff === undefined
+        ? 0
+        : number(chart.fit_diff, `${path}.fit_diff`, 0, 20)
+    })
+    result.set(Number(idText), values)
+  }
+  return result
+}
+
+export function extractDivingFishChartMetadata(
+  value: unknown,
+  chartStats?: unknown,
+): DivingFishChartMetadata[] {
+  const fitLevels = divingFishFitLevels(chartStats)
   return array(value, 'divingFishMusicData').flatMap((entry, musicIndex) => {
     const path = `divingFishMusicData[${musicIndex}]`
     const input = record(entry, path)
@@ -179,6 +205,7 @@ export function extractDivingFishChartMetadata(value: unknown): DivingFishChartM
           parsedNotes.break,
         ] as [number, number, number, number, number],
         notesDesigner: string(chart.charter ?? '', `${chartPath}.charter`, true),
+        fitLevelValue: fitLevels.get(musicId)?.[chartIndex] ?? 0,
       }
     })
     return charts.length ? [{ musicId, charts }] : []
@@ -204,11 +231,18 @@ function normalizeChartMetadata(value: unknown) {
           parsedNotes.break,
         ] as [number, number, number, number, number],
         notesDesigner: string(chart.notesDesigner ?? '', `${chartPath}.notesDesigner`, true),
+        fitLevelValue: chart.fitLevelValue === undefined
+          ? 0
+          : number(chart.fitLevelValue, `${chartPath}.fitLevelValue`, 0, 20),
       }
     })
     return { musicId, charts }
   })
   return uniqueMap(entries, entry => entry.musicId, 'chartMetadata')
+}
+
+export function parseDivingFishChartMetadata(value: unknown) {
+  return [...normalizeChartMetadata(value).values()]
 }
 
 function normalizeVersions(value: unknown) {
@@ -264,7 +298,7 @@ function normalizeMusics(value: unknown, versions: Map<string, GameVersion>) {
       if (actualDifficulty !== expectedDifficulty) {
         throw new TypeError(`${chartPath} violates difficulty order: expected ${expectedDifficulty}, received ${actualDifficulty}`)
       }
-      return new ChartInfo(
+      const result = new ChartInfo(
         music,
         MusicDifficulty.of(expectedDifficulty),
         string(chart.level, `${chartPath}.level`),
@@ -272,6 +306,10 @@ function normalizeMusics(value: unknown, versions: Map<string, GameVersion>) {
         notes(chart.notes, `${chartPath}.notes`),
         string(chart.notesDesigner ?? chart.charter ?? '', `${chartPath}.notesDesigner`, true),
       )
+      result.fitLevelValue = chart.fitLevelValue === undefined
+        ? 0
+        : number(chart.fitLevelValue, `${chartPath}.fitLevelValue`, 0, 20)
+      return result
     })
     return music
   })
@@ -349,7 +387,11 @@ function normalizeCourses(value: unknown, musics: Map<number, MusicInfo>) {
   return uniqueMap(courses, course => course.id, 'courses')
 }
 
-function fromDivingFish(value: unknown[], revision: string): UnknownRecord {
+function fromDivingFish(
+  value: unknown[],
+  revision: string,
+  chartMetadata = new Map<number, DivingFishChartMetadata>(),
+): UnknownRecord {
   const versionNames: string[] = []
   for (const [index, entry] of value.entries()) {
     const input = record(entry, `musics[${index}]`)
@@ -393,6 +435,9 @@ function fromDivingFish(value: unknown[], revision: string): UnknownRecord {
             levelValue: constants[chartIndex],
             notes: chart.notes,
             notesDesigner: chart.charter,
+            fitLevelValue: chartMetadata.get(Number(idText))?.charts.find(entry => (
+              entry.difficulty === chartIndex
+            ))?.fitLevelValue ?? 0,
           }
         }),
       }]
@@ -471,6 +516,7 @@ function fromLxns(value: UnknownRecord, revision: string): UnknownRecord {
                 ]
               : metadata?.notes ?? [0, 0, 0, 0, 0],
             notesDesigner: designer.trim() ? designer : metadata?.notesDesigner ?? '',
+            fitLevelValue: metadata?.fitLevelValue ?? 0,
           }
         }),
       }]
@@ -507,6 +553,12 @@ export function normalizeMaimaiSource(value: unknown, options: { revision?: stri
     ? fromDivingFish(raw, options.revision ?? 'diving-fish')
     : raw.sourceType === 'lxns'
       ? fromLxns(raw, string(raw.revision ?? options.revision, 'revision'))
+      : raw.sourceType === 'diving-fish'
+        ? fromDivingFish(
+            array(raw.musicData, 'musicData'),
+            string(raw.revision ?? options.revision, 'revision'),
+            normalizeChartMetadata(raw.chartMetadata ?? []),
+          )
       : raw
   const revision = string(input.revision ?? options.revision, 'revision')
   const versions = normalizeVersions(input.versions)

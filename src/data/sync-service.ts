@@ -12,6 +12,8 @@ import { inspectFile, parseResourceManifest, sha256, type ResourceManifest, type
 import {
   normalizeMaimaiSource,
   extractDivingFishChartMetadata,
+  parseDivingFishChartMetadata,
+  type DivingFishChartMetadata,
   type CourseInfo,
   type IconInfo,
   type NormalizedMaimaiSource,
@@ -19,6 +21,7 @@ import {
 } from './normalizers'
 
 const DEFAULT_PROBER_DATA_URL = 'https://www.diving-fish.com/api/maimaidxprober/music_data'
+const DEFAULT_PROBER_CHART_STATS_URL = 'https://www.diving-fish.com/api/maimaidxprober/chart_stats'
 const LXNS_SONG_LIST_URL = 'https://maimai.lxns.net/api/v0/maimai/song/list'
 const LXNS_ICON_LIST_URL = 'https://maimai.lxns.net/api/v0/maimai/icon/list'
 const LXNS_PLATE_LIST_URL = 'https://maimai.lxns.net/api/v0/maimai/plate/list'
@@ -62,6 +65,7 @@ export interface MaimaiDataSyncOptions {
   fetch?: typeof fetch
   logger?: DataSyncLogger
   proberDataUrl?: string
+  proberChartStatsUrl?: string
   builtinSource?: unknown | null
   debug?: DebugTracer
   now?: () => Date
@@ -194,10 +198,40 @@ function ensureBaseUrl(value: string, validateUrl: (url: URL) => void) {
   return url
 }
 
+function mergeChartMetadata(
+  current: DivingFishChartMetadata[],
+  cached: DivingFishChartMetadata[],
+) {
+  const cachedByMusic = new Map(cached.map(entry => [entry.musicId, entry]))
+  const merged = current.map(entry => {
+    const cachedEntry = cachedByMusic.get(entry.musicId)
+    const charts = entry.charts.map(chart => {
+      if (chart.fitLevelValue) return chart
+      const fallback = cachedEntry?.charts.find(candidate => (
+        candidate.difficulty === chart.difficulty
+      ))
+      return fallback?.fitLevelValue
+        ? { ...chart, fitLevelValue: fallback.fitLevelValue }
+        : chart
+    })
+    const currentDifficulties = new Set(charts.map(chart => chart.difficulty))
+    return {
+      ...entry,
+      charts: [
+        ...charts,
+        ...(cachedEntry?.charts.filter(chart => !currentDifficulties.has(chart.difficulty)) ?? []),
+      ],
+    }
+  })
+  const currentIds = new Set(merged.map(entry => entry.musicId))
+  return [...merged, ...cached.filter(entry => !currentIds.has(entry.musicId))]
+}
+
 export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
   private readonly logger: DataSyncLogger
   private readonly cache: CacheStore
   private readonly proberDataUrl: string
+  private readonly proberChartStatsUrl: string
   private readonly builtinSource: unknown | null
   private readonly validateRemoteUrl: (url: URL) => void
   private readonly assets: LxnsAssetCache
@@ -224,6 +258,9 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
       now: options.now,
     })
     this.proberDataUrl = options.proberDataUrl === undefined ? DEFAULT_PROBER_DATA_URL : options.proberDataUrl
+    this.proberChartStatsUrl = options.proberChartStatsUrl === undefined
+      ? DEFAULT_PROBER_CHART_STATS_URL
+      : options.proberChartStatsUrl
     this.builtinSource = options.builtinSource === undefined ? BUILTIN_SOURCE : options.builtinSource
     this.validateRemoteUrl = createRemoteUrlValidator(options.config.allowedHosts)
   }
@@ -334,7 +371,7 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
       const source = JSON.parse(await readFile(cached.sourcePath, 'utf8'))
       if (Array.isArray(source)) return extractDivingFishChartMetadata(source)
       if (source && typeof source === 'object' && Array.isArray(source.chartMetadata)) {
-        return source.chartMetadata
+        return parseDivingFishChartMetadata(source.chartMetadata)
       }
     } catch {
       // A missing or incompatible snapshot simply means there is no metadata fallback yet.
@@ -345,6 +382,7 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
   private async syncChartMetadata(staging: string) {
     if (!this.proberDataUrl) return this.cachedChartMetadata()
     const target = join(staging, 'chart-metadata-source.json')
+    const statsTarget = join(staging, 'chart-metadata-stats.json')
     try {
       const startedAt = Date.now()
       this.options.debug?.event('data.chart-metadata.start', { source: 'diving-fish' })
@@ -353,14 +391,37 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
         maxBytes: 32 * 1024 * 1024,
         validateUrl: this.validateRemoteUrl,
       })
-      const metadata = extractDivingFishChartMetadata(
-        JSON.parse(await readFile(target, 'utf8')),
+      let chartStats: unknown
+      if (this.proberChartStatsUrl) {
+        try {
+          await this.cache.downloadComputed(this.proberChartStatsUrl, statsTarget, {
+            timeoutMs: this.options.config.timeoutMs,
+            maxBytes: 32 * 1024 * 1024,
+            validateUrl: this.validateRemoteUrl,
+          })
+          chartStats = JSON.parse(await readFile(statsTarget, 'utf8'))
+        } catch (error) {
+          this.options.debug?.failure('data.chart-stats.failure', error, {
+            source: 'diving-fish',
+          })
+        }
+      }
+      const cached = await this.cachedChartMetadata()
+      const metadata = mergeChartMetadata(
+        extractDivingFishChartMetadata(
+          JSON.parse(await readFile(target, 'utf8')),
+          chartStats,
+        ),
+        cached,
       )
       if (!metadata.length) throw new Error('Diving Fish chart metadata is empty')
       this.options.debug?.event('data.chart-metadata.success', {
         source: 'diving-fish',
         musics: metadata.length,
         charts: metadata.reduce((sum, music) => sum + music.charts.length, 0),
+        fitLevels: metadata.reduce((sum, music) => (
+          sum + music.charts.filter(chart => chart.fitLevelValue > 0).length
+        ), 0),
         durationMs: Date.now() - startedAt,
       })
       return metadata
@@ -376,7 +437,10 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
       }
       return cached
     } finally {
-      await rm(target, { force: true })
+      await Promise.all([
+        rm(target, { force: true }),
+        rm(statsTarget, { force: true }),
+      ])
     }
   }
 
@@ -427,18 +491,52 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
   private async syncProberSource() {
     const staging = await this.cache.createStagingDirectory()
     try {
+      const rawSourcePath = join(staging, 'diving-fish-music-data.json')
       const sourcePath = join(staging, 'source.json')
-      const metadata = await this.cache.downloadComputed(
+      await this.cache.downloadComputed(
         this.proberDataUrl,
-        sourcePath,
+        rawSourcePath,
         {
           timeoutMs: this.options.config.timeoutMs,
           maxBytes: 32 * 1024 * 1024,
           validateUrl: this.validateRemoteUrl,
         },
       )
-      const source = JSON.parse(await readFile(sourcePath, 'utf8'))
+      const musicData = JSON.parse(await readFile(rawSourcePath, 'utf8'))
+      const statsPath = join(staging, 'diving-fish-chart-stats.json')
+      let chartStats: unknown
+      if (this.proberChartStatsUrl) {
+        try {
+          await this.cache.downloadComputed(this.proberChartStatsUrl, statsPath, {
+            timeoutMs: this.options.config.timeoutMs,
+            maxBytes: 32 * 1024 * 1024,
+            validateUrl: this.validateRemoteUrl,
+          })
+          chartStats = JSON.parse(await readFile(statsPath, 'utf8'))
+        } catch (error) {
+          this.options.debug?.failure('data.chart-stats.failure', error, {
+            source: 'diving-fish',
+          })
+        }
+      }
+      const chartMetadata = mergeChartMetadata(
+        extractDivingFishChartMetadata(musicData, chartStats),
+        await this.cachedChartMetadata(),
+      )
+      const payload = {
+        sourceType: 'diving-fish',
+        musicData,
+        chartMetadata,
+      }
+      const serialized = `${JSON.stringify(payload)}\n`
+      const revision = `diving-fish-${sha256(serialized).slice(0, 16)}`
+      const source = { ...payload, revision }
       const data = normalizeMaimaiSource(source)
+      const metadata = await this.cache.writeAtomic(sourcePath, `${JSON.stringify(source)}\n`)
+      await Promise.all([
+        rm(rawSourcePath, { force: true }),
+        rm(statsPath, { force: true }),
+      ])
       await this.cache.commitSnapshot(staging, data.revision, {
         'source.json': { ...metadata, source: this.proberDataUrl },
       })

@@ -52,7 +52,7 @@ koishi-plugin-mai-plugin
 
 ## 数据源与资源缓存
 
-曲目元数据优先通过 [LXNS maimai API](https://maimai.lxns.net/docs/api/maimai) 获取。由于 LXNS 曲目接口不提供谱面 Notes 物量，插件会从水鱼曲库补全各难度的 TAP、HOLD、SLIDE、TOUCH、BREAK 和缺失的谱师信息，并将精简后的谱面元数据写入同一份本地快照；水鱼临时不可用时会复用上次缓存。LXNS 不可用时自动切换到完整水鱼曲库；两个远程源都不可用时读取最近一次成功的本地快照，首次运行且没有快照时才使用内置最小数据。
+曲目元数据优先通过 [LXNS maimai API](https://maimai.lxns.net/docs/api/maimai) 获取。由于 LXNS 曲目接口不提供谱面 Notes 物量，插件会从水鱼 `music_data` 补全各难度的 TAP、HOLD、SLIDE、TOUCH、BREAK 和缺失的谱师信息，并从无需鉴权的 `chart_stats` 接口读取 `fit_diff` 作为拟合定数。精简后的谱面元数据会写入同一份本地快照；任一水鱼接口临时不可用时会复用上次缓存中的对应字段。LXNS 不可用时自动切换到完整水鱼曲库；两个远程源都不可用时读取最近一次成功的本地快照，首次运行且没有快照时才使用内置最小数据。
 
 远端歌曲别名只从 LXNS `GET /api/v0/maimai/alias/list` 获取，水鱼不作为歌曲别名数据源。有效缓存位于 `resourceSync.cacheDir/aliases.json`；存在有效缓存时不会访问网络，当前也不会自动刷新。远端响应和本地缓存均受 8 MiB 文件大小、20,000 个源别名总数、256,000 个原始源别名 Unicode 码点总预算、256,000 个归一化搜索文本 Unicode 码点总预算、20,000 条记录、每首曲目 128 个别名及单个别名 128 个 Unicode 码点的安全上限约束，任一超限会拒绝整包数据；准备写入的序列化缓存还会再次验证其 UTF-8 大小不超过 8 MiB。缓存缺失、损坏、不包含有效别名或超过安全上限时，插件会重新拉取并原子保存；拉取、校验或保存失败不会阻塞启动，也不会覆盖原缓存。搜索时依次匹配正式标题、远端别名和用户已批准别名。远端别名缓存流程不会写入 `mai_alias` 或 `mai_alias_vote`。
 

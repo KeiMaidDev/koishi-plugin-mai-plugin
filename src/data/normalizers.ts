@@ -56,6 +56,15 @@ export interface NormalizedMaimaiSource {
 
 type UnknownRecord = Record<string, unknown>
 
+interface DivingFishChartMetadata {
+  musicId: number
+  charts: Array<{
+    difficulty: number
+    notes: [number, number, number, number, number]
+    notesDesigner: string
+  }>
+}
+
 function record(value: unknown, path: string): UnknownRecord {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new TypeError(`${path} must be an object`)
@@ -146,6 +155,60 @@ function notes(value: unknown, path: string) {
 
 function integerList(value: unknown, path: string) {
   return array(value, path).map((entry, index) => integer(entry, `${path}[${index}]`, 1))
+}
+
+export function extractDivingFishChartMetadata(value: unknown): DivingFishChartMetadata[] {
+  return array(value, 'divingFishMusicData').flatMap((entry, musicIndex) => {
+    const path = `divingFishMusicData[${musicIndex}]`
+    const input = record(entry, path)
+    const idText = string(input.id, `${path}.id`)
+    if (!/^\d+$/.test(idText)) throw new TypeError(`${path}.id must contain digits only`)
+    const musicId = Number(idText)
+    const chartInputs = array(input.charts, `${path}.charts`)
+    const charts = chartInputs.map((chartEntry, chartIndex) => {
+      const chartPath = `${path}.charts[${chartIndex}]`
+      const chart = record(chartEntry, chartPath)
+      const parsedNotes = notes(chart.notes, `${chartPath}.notes`)
+      return {
+        difficulty: chartIndex,
+        notes: [
+          parsedNotes.tap,
+          parsedNotes.hold,
+          parsedNotes.slide,
+          parsedNotes.touch,
+          parsedNotes.break,
+        ] as [number, number, number, number, number],
+        notesDesigner: string(chart.charter ?? '', `${chartPath}.charter`, true),
+      }
+    })
+    return charts.length ? [{ musicId, charts }] : []
+  })
+}
+
+function normalizeChartMetadata(value: unknown) {
+  const entries = array(value ?? [], 'chartMetadata').map((entry, musicIndex) => {
+    const path = `chartMetadata[${musicIndex}]`
+    const input = record(entry, path)
+    const musicId = integer(input.musicId, `${path}.musicId`, 1)
+    const charts = array(input.charts, `${path}.charts`).map((chartEntry, chartIndex) => {
+      const chartPath = `${path}.charts[${chartIndex}]`
+      const chart = record(chartEntry, chartPath)
+      const parsedNotes = notes(chart.notes, `${chartPath}.notes`)
+      return {
+        difficulty: integer(chart.difficulty, `${chartPath}.difficulty`, 0, 10),
+        notes: [
+          parsedNotes.tap,
+          parsedNotes.hold,
+          parsedNotes.slide,
+          parsedNotes.touch,
+          parsedNotes.break,
+        ] as [number, number, number, number, number],
+        notesDesigner: string(chart.notesDesigner ?? '', `${chartPath}.notesDesigner`, true),
+      }
+    })
+    return { musicId, charts }
+  })
+  return uniqueMap(entries, entry => entry.musicId, 'chartMetadata')
 }
 
 function normalizeVersions(value: unknown) {
@@ -341,6 +404,7 @@ function fromDivingFish(value: unknown[], revision: string): UnknownRecord {
 }
 
 function fromLxns(value: UnknownRecord, revision: string): UnknownRecord {
+  const chartMetadata = normalizeChartMetadata(value.chartMetadata ?? [])
   const versionInputs = array(value.versions, 'versions')
   const versions = versionInputs.map((entry, index) => {
     const input = record(entry, `versions[${index}]`)
@@ -386,10 +450,15 @@ function fromLxns(value: UnknownRecord, revision: string): UnknownRecord {
           const notesInput = chart.notes === undefined || chart.notes === null
             ? null
             : record(chart.notes, `${chartPath}.notes`)
+          const difficulty = type === 'utage'
+            ? MusicDifficulty.Utage.value
+            : integer(chart.difficulty, `${chartPath}.difficulty`, 0, 4)
+          const metadata = chartMetadata.get(musicId)?.charts.find(entry => (
+            entry.difficulty === difficulty
+          ))
+          const designer = string(chart.note_designer ?? '', `${chartPath}.note_designer`, true)
           return {
-            difficulty: type === 'utage'
-              ? MusicDifficulty.Utage.value
-              : integer(chart.difficulty, `${chartPath}.difficulty`, 0, 4),
+            difficulty,
             level: string(chart.level, `${chartPath}.level`),
             levelValue: number(chart.level_value, `${chartPath}.level_value`, 0, 20),
             notes: notesInput
@@ -400,8 +469,8 @@ function fromLxns(value: UnknownRecord, revision: string): UnknownRecord {
                   integer(notesInput.touch ?? 0, `${chartPath}.notes.touch`),
                   integer(notesInput.break ?? 0, `${chartPath}.notes.break`),
                 ]
-              : [0, 0, 0, 0, 0],
-            notesDesigner: string(chart.note_designer ?? '', `${chartPath}.note_designer`, true),
+              : metadata?.notes ?? [0, 0, 0, 0, 0],
+            notesDesigner: designer.trim() ? designer : metadata?.notesDesigner ?? '',
           }
         }),
       }]

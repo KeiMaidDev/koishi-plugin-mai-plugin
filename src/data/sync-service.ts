@@ -11,6 +11,7 @@ import { LxnsAssetCache } from './lxns-assets'
 import { inspectFile, parseResourceManifest, sha256, type ResourceManifest, type ResourceManifestFile } from './manifest'
 import {
   normalizeMaimaiSource,
+  extractDivingFishChartMetadata,
   type CourseInfo,
   type IconInfo,
   type NormalizedMaimaiSource,
@@ -302,11 +303,13 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
       const [songs, icons, plates] = await Promise.all(requests.map(([filename]) => (
         readFile(join(staging, filename), 'utf8').then(JSON.parse)
       )))
+      const chartMetadata = await this.syncChartMetadata(staging)
       const source = {
         sourceType: 'lxns',
         ...songs,
         icons: icons.icons,
         plates: plates.plates,
+        chartMetadata,
       }
       const serialized = `${JSON.stringify(source)}\n`
       const revision = `lxns-${sha256(serialized).slice(0, 16)}`
@@ -322,6 +325,58 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
     } catch (error) {
       await this.cache.discardStagingDirectory(staging)
       throw error
+    }
+  }
+
+  private async cachedChartMetadata() {
+    try {
+      const cached = await this.cache.loadSnapshot()
+      const source = JSON.parse(await readFile(cached.sourcePath, 'utf8'))
+      if (Array.isArray(source)) return extractDivingFishChartMetadata(source)
+      if (source && typeof source === 'object' && Array.isArray(source.chartMetadata)) {
+        return source.chartMetadata
+      }
+    } catch {
+      // A missing or incompatible snapshot simply means there is no metadata fallback yet.
+    }
+    return []
+  }
+
+  private async syncChartMetadata(staging: string) {
+    if (!this.proberDataUrl) return this.cachedChartMetadata()
+    const target = join(staging, 'chart-metadata-source.json')
+    try {
+      const startedAt = Date.now()
+      this.options.debug?.event('data.chart-metadata.start', { source: 'diving-fish' })
+      await this.cache.downloadComputed(this.proberDataUrl, target, {
+        timeoutMs: this.options.config.timeoutMs,
+        maxBytes: 32 * 1024 * 1024,
+        validateUrl: this.validateRemoteUrl,
+      })
+      const metadata = extractDivingFishChartMetadata(
+        JSON.parse(await readFile(target, 'utf8')),
+      )
+      if (!metadata.length) throw new Error('Diving Fish chart metadata is empty')
+      this.options.debug?.event('data.chart-metadata.success', {
+        source: 'diving-fish',
+        musics: metadata.length,
+        charts: metadata.reduce((sum, music) => sum + music.charts.length, 0),
+        durationMs: Date.now() - startedAt,
+      })
+      return metadata
+    } catch (error) {
+      this.options.debug?.failure('data.chart-metadata.failure', error, {
+        source: 'diving-fish',
+      })
+      const cached = await this.cachedChartMetadata()
+      if (cached.length) {
+        this.options.debug?.event('data.chart-metadata.cache', {
+          musics: cached.length,
+        })
+      }
+      return cached
+    } finally {
+      await rm(target, { force: true })
     }
   }
 

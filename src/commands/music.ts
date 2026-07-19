@@ -1,11 +1,12 @@
 import type { Command, Context } from 'koishi'
+import h from '@satorijs/element'
 import { readFile } from 'node:fs/promises'
 import { extname } from 'node:path'
 import { Worker } from 'node:worker_threads'
-import { lxnsAssetUrl } from '../data/lxns-assets'
 import { MusicDifficulty } from '../domain/enums'
 import type { ChartInfo, MusicInfo } from '../domain/music'
 import { isAdministrator } from '../platform/admin'
+import { transformAssetImageUrl } from '../platform/qq-markdown-image'
 import {
   createPagedCallbackButtons,
   createInlineCommandLink,
@@ -118,8 +119,8 @@ function commandLink(label: string, command: string) {
   return createInlineCommandLink(label || '-', command)
 }
 
-function jacketMarkdown(music: MusicInfo, size: number, alt = '封面') {
-  return `![${alt} #${size}px #${size}px](${lxnsAssetUrl('jacket', music.resourceId)})`
+function jacketMarkdown(url: string, size: number, alt = '封面') {
+  return `![${alt} #${size}px #${size}px](${url})`
 }
 
 function difficultyLabel(difficulty: MusicDifficulty) {
@@ -192,7 +193,7 @@ function chartKeyboard(chart: ChartInfo) {
   )])])
 }
 
-function formatMusicMarkdown(music: MusicInfo) {
+function formatMusicMarkdown(music: MusicInfo, coverUrl: string | null) {
   const constants = music.charts.map(chart => (
     commandLink(chart.levelValue.toFixed(1), `/mai 定数查歌 ${chart.levelValue.toFixed(1)}`)
   )).join('/')
@@ -204,7 +205,7 @@ function formatMusicMarkdown(music: MusicInfo) {
     return designer === '-' ? designer : commandLink(designer, `/mai 谱师查歌 ${designer}`)
   }).join('/')
   return [
-    jacketMarkdown(music, 190),
+    ...(coverUrl ? [jacketMarkdown(coverUrl, 190)] : []),
     `**${music.id}. ${music.name}**`,
     `**曲师：** ${commandLink(music.artist, `/mai 曲师查歌 ${music.artist}`)}`,
     `**分类：** ${commandLink(music.genre.genreName, `/mai 搜索 ${music.genre.genreName}`)}`,
@@ -216,11 +217,11 @@ function formatMusicMarkdown(music: MusicInfo) {
   ].join('\n')
 }
 
-function formatChartMarkdown(chart: ChartInfo) {
+function formatChartMarkdown(chart: ChartInfo, coverUrl: string | null) {
   const { music, notes } = chart
   const designer = chartDesigner(chart)
   return [
-    jacketMarkdown(music, 190),
+    ...(coverUrl ? [jacketMarkdown(coverUrl, 190)] : []),
     `**${chart.difficulty.brief}${music.id}. ${music.name}**`,
     `**曲师：** ${commandLink(music.artist, `/mai 曲师查歌 ${music.artist}`)}`,
     `**分类：** ${commandLink(music.genre.genreName, `/mai 搜索 ${music.genre.genreName}`)}`,
@@ -242,9 +243,13 @@ function formatChartMarkdown(chart: ChartInfo) {
   ].join('\n')
 }
 
-async function loadCover(dependencies: CoreCommandDependencies, music: MusicInfo) {
+async function loadCover(
+  dependencies: CoreCommandDependencies,
+  music: MusicInfo,
+  thumbnail = false,
+) {
   try {
-    const path = await dependencies.data.coverPath(music.resourceId)
+    const path = await dependencies.data.coverPath(music.resourceId, thumbnail)
     const extension = extname(path).toLocaleLowerCase()
     return {
       data: await readFile(path),
@@ -259,6 +264,39 @@ async function loadCover(dependencies: CoreCommandDependencies, music: MusicInfo
   }
 }
 
+const publicCoverCaches = new WeakMap<object, Map<string, Promise<string | null>>>()
+
+function mappedCoverUrl(
+  dependencies: CoreCommandDependencies,
+  music: MusicInfo,
+  thumbnail = false,
+) {
+  if (!dependencies.assetTransformer) return Promise.resolve(null)
+  let cache = publicCoverCaches.get(dependencies)
+  if (!cache) {
+    cache = new Map()
+    publicCoverCaches.set(dependencies, cache)
+  }
+  const key = `${music.resourceId}:${thumbnail ? 'thumbnail' : 'full'}`
+  const existing = cache.get(key)
+  if (existing) return existing
+  const pending = (async () => {
+    const cover = await loadCover(dependencies, music, thumbnail)
+    if (!cover) return null
+    try {
+      return await transformAssetImageUrl(
+        cover.data,
+        cover.mimeType,
+        dependencies.assetTransformer!,
+      )
+    } catch {
+      return null
+    }
+  })()
+  cache.set(key, pending)
+  return pending
+}
+
 async function replyMusicDetails(
   session: ActiveCommandSession,
   dependencies: CoreCommandDependencies,
@@ -267,17 +305,21 @@ async function replyMusicDetails(
 ) {
   const text = chart ? formatChartText(chart) : formatMusicText(music)
   const compatibilityMode = await compatibilityModeFor(session, dependencies)
-  const cover = session.platform === 'qq' && !compatibilityMode
-    ? null
-    : await loadCover(dependencies, music)
+  const useQqMarkdown = session.platform === 'qq' && !compatibilityMode
+  const coverUrl = useQqMarkdown ? await mappedCoverUrl(dependencies, music) : null
+  const cover = !useQqMarkdown || !coverUrl ? await loadCover(dependencies, music) : null
   const fallback = [
     ...(cover ? [{ type: 'image' as const, ...cover }] : []),
     { type: 'text' as const, text },
   ]
   const rich = createQqNativeMarkdown(
-    chart ? formatChartMarkdown(chart) : formatMusicMarkdown(music),
+    chart ? formatChartMarkdown(chart, coverUrl) : formatMusicMarkdown(music, coverUrl),
     chart ? chartKeyboard(chart) : musicKeyboard(music),
   )
+  if (useQqMarkdown && !coverUrl && cover) {
+    await session.send([h.image(cover.data, cover.mimeType), rich])
+    return
+  }
   await sendReply(session, fallback, rich, {
     compatibilityMode,
   })
@@ -305,7 +347,7 @@ function pageText(results: readonly MusicSearchResult[], page: number) {
   }
 }
 
-function resultMarkdown(result: MusicSearchResult) {
+function resultMarkdown(result: MusicSearchResult, coverUrl: string | null) {
   const music = isChart(result) ? result.music : result
   const label = isChart(result)
     ? `${result.difficulty.brief}${music.id}. ${music.name}`
@@ -313,10 +355,11 @@ function resultMarkdown(result: MusicSearchResult) {
   const command = isChart(result)
     ? `/mai ${result.difficulty.brief}id${music.id}`
     : `/mai id${music.id}`
-  return `${jacketMarkdown(music, 20, 'preview')} ${createInlineCommandLink(label, command)}`
+  const preview = coverUrl ? `${jacketMarkdown(coverUrl, 20, 'preview')} ` : ''
+  return `${preview}${createInlineCommandLink(label, command)}`
 }
 
-function createSearchPage(
+async function createSearchPage(
   dependencies: CoreCommandDependencies,
   results: readonly MusicSearchResult[],
   query: string,
@@ -325,21 +368,25 @@ function createSearchPage(
 ) {
   const view = pageText(results, page)
   const start = (view.currentPage - 1) * SEARCH_PAGE_SIZE
+  const pageResults = results.slice(start, start + SEARCH_PAGE_SIZE)
+  const coverUrls = await Promise.all(pageResults.map(result => (
+    mappedCoverUrl(dependencies, isChart(result) ? result.music : result, true)
+  )))
   const markdown = [
     `**${view.text.slice(0, view.text.indexOf('\n'))}**`,
     '',
-    ...results.slice(start, start + SEARCH_PAGE_SIZE).map(resultMarkdown),
+    ...pageResults.map((result, index) => resultMarkdown(result, coverUrls[index])),
   ].join('\n')
   const callbackData = (targetPage: number) => dependencies.callbackRouter.registerPagination({
     payload: { mode: 'search', query, page: targetPage },
     expectedChannelId: channelId,
-    handler: payload => createSearchPage(
+    handler: async payload => (await createSearchPage(
       dependencies,
       results,
       payload.query,
       payload.page,
       channelId,
-    ).rich,
+    )).rich,
   })
   const row = createPagedCallbackButtons({
     page: view.currentPage,
@@ -376,7 +423,7 @@ async function showResults(
     return
   }
 
-  const view = createSearchPage(
+  const view = await createSearchPage(
     dependencies,
     results,
     query,

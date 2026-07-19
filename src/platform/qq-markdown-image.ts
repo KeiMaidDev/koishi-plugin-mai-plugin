@@ -59,6 +59,18 @@ function transformedImageUrl(content: string) {
   return parsePublicImageUrl(image.attrs.src).toString()
 }
 
+export async function transformAssetImageUrl(
+  image: Buffer | Uint8Array,
+  mimeType: string,
+  assets: AssetTransformer,
+) {
+  if (!/^image\/(?:png|jpe?g|webp)$/i.test(mimeType)) {
+    throw new TypeError('Assets image transformation requires a supported image MIME type.')
+  }
+  const transformed = await assets.transform(h.image(Buffer.from(image), mimeType).toString())
+  return transformedImageUrl(transformed)
+}
+
 export async function createQqMarkdownImage(options: QqMarkdownImageOptions) {
   const image = Buffer.from(options.image)
   const metadata = await sharp(image).metadata()

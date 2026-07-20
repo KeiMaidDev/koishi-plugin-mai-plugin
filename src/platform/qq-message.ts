@@ -16,18 +16,21 @@ export type QqButtonPermission = { type: 2 }
 interface QqButtonActionBase {
   permission: QqButtonPermission
   data: string
+}
+
+interface QqUnsupportedButtonAction extends QqButtonActionBase {
   unsupport_tips: string
 }
 
-export interface QqUrlButtonAction extends QqButtonActionBase {
+export interface QqUrlButtonAction extends QqUnsupportedButtonAction {
   type: 0
 }
 
-export interface QqCallbackButtonAction extends QqButtonActionBase {
+export interface QqCallbackButtonAction extends QqUnsupportedButtonAction {
   type: 1
 }
 
-export interface QqCommandButtonAction extends QqButtonActionBase {
+export interface QqCommandButtonAction extends QqUnsupportedButtonAction {
   type: 2
   reply: false
   enter: boolean
@@ -40,7 +43,7 @@ export type QqButtonAction =
 
 export interface QqButtonRenderData {
   label: string
-  visited_label: string
+  visited_label?: string
   style: 0 | 1
 }
 
@@ -121,7 +124,7 @@ export function createQqCallbackAction(
   return {
     type: 1,
     permission: { type: 2 },
-    data: nonEmpty(data, 'QQ callback data'),
+    data: commandData(data),
     unsupport_tips: resolveUnsupportTips(options.unsupportTips),
   }
 }
@@ -155,7 +158,7 @@ export function createQqButton(
   label: string,
   action: QqButtonAction,
   style: 0 | 1 = 1,
-  visitedLabel = label,
+  visitedLabel: string | null = label,
 ): QqButton {
   if (style !== 0 && style !== 1) {
     throw new TypeError('QQ button style must be 0 or 1.')
@@ -164,8 +167,10 @@ export function createQqButton(
     id: nonEmpty(id, 'QQ button ID'),
     render_data: {
       label: nonEmpty(label, 'QQ button label'),
-      visited_label: nonEmpty(visitedLabel, 'QQ button visited label'),
       style,
+      ...(visitedLabel === null
+        ? {}
+        : { visited_label: nonEmpty(visitedLabel, 'QQ button visited label') }),
     },
     action,
   }
@@ -267,7 +272,8 @@ export function createPagedCallbackButtons(
       `page-${options.page - 1}`,
       options.previousLabel ?? '上一页',
       createQqCallbackAction(options.pageCommand(options.page - 1)),
-      0,
+      1,
+      null,
     ))
   }
   if (options.page < options.totalPages) {
@@ -275,7 +281,8 @@ export function createPagedCallbackButtons(
       `page-${options.page + 1}`,
       options.nextLabel ?? '下一页',
       createQqCallbackAction(options.pageCommand(options.page + 1)),
-      0,
+      1,
+      null,
     ))
   }
   return buttons.length ? createQqButtonRow(buttons) : { buttons }

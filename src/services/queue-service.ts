@@ -112,28 +112,6 @@ function compact(value: string) {
   return value.replaceAll(' ', '')
 }
 
-function normalizeMessage(raw: string) {
-  let content = raw.trim()
-  content = content.replace(/^\/mai(?=$|[\s/])/iu, '').trim()
-  if (content.startsWith('/')) content = content.slice(1)
-  return compact(content).trim()
-}
-
-const MAX_QUEUE_MESSAGE_LENGTH = 96
-
-interface CountCandidate {
-  arcade: ArcadeSnapshot
-  mutation: { type: 'set' | 'adjust', value: number }
-}
-
-function queryName(raw: string) {
-  if (/^j$/iu.test(raw) || raw === '几' || raw === '几个') return ''
-  if (/j$/iu.test(raw)) return raw.slice(0, -1)
-  if (raw.endsWith('几个')) return raw.slice(0, -2)
-  if (raw.endsWith('几')) return raw.slice(0, -1)
-  return null
-}
-
 function formatStatus(arcade: ArcadeSnapshot, now: Date) {
   let updated: string
   if (arcade.modifiedAt.getTime() === ARCADE_NO_UPDATES_AT_MS) {
@@ -153,23 +131,14 @@ function formatQuery(arcades: ArcadeSnapshot[], now: Date) {
     '',
     statuses,
     '',
-    '更新数据请使用“机厅名+数量”的格式，如 “jt3” 或 “jt+1” 或 “jt-1”。',
+    '更新数据请使用“/mai 排卡管理 更新人数 <机厅名称> <人数或增量>”。',
   ].join('\n')
 }
 
 const EMPTY_QUEUE_TEXT = '当前群未设置机厅，请先添加机厅。'
 
-function countCandidate(
-  arcade: ArcadeSnapshot,
-  alias: string,
-  raw: string,
-): CountCandidate | null {
-  const normalizedAlias = compact(alias)
-  if (!normalizedAlias || !raw.toLocaleLowerCase().startsWith(normalizedAlias.toLocaleLowerCase())) {
-    return null
-  }
-  const suffix = raw.slice(normalizedAlias.length)
-  const match = suffix.match(/^([+=-]?)(\d+)$/u)
+function parseCountMutation(raw: string) {
+  const match = raw.trim().match(/^([+=-]?)(\d+)$/u)
   if (!match) return null
   const magnitude = BigInt(match[2])
   const bounded = Number(
@@ -177,9 +146,9 @@ function countCandidate(
       ? BigInt(Number.MAX_SAFE_INTEGER)
       : magnitude,
   )
-  if (match[1] === '+') return { arcade, mutation: { type: 'adjust', value: bounded } }
-  if (match[1] === '-') return { arcade, mutation: { type: 'adjust', value: -bounded } }
-  return { arcade, mutation: { type: 'set', value: bounded } }
+  if (match[1] === '+') return { type: 'adjust' as const, value: bounded }
+  if (match[1] === '-') return { type: 'adjust' as const, value: -bounded }
+  return { type: 'set' as const, value: bounded }
 }
 
 export class QueueService {
@@ -220,46 +189,51 @@ export class QueueService {
     return translateRepositoryErrors(() => this.repository.bind(channelId, name), false)
   }
 
-  async handleMessage(channelId: string, rawContent: string): Promise<QueueMessageResult | null> {
-    const content = normalizeMessage(rawContent)
-    if (!content || content.length > MAX_QUEUE_MESSAGE_LENGTH) return null
+  async query(channelId: string, rawName = ''): Promise<QueueMessageResult | null> {
     const now = this.options.now?.() ?? new Date()
     const arcades = await this.repository.list(channelId, now)
-    const requestedName = queryName(content)
-    if (requestedName !== null) {
-      if (!arcades?.length) return { type: 'empty', text: EMPTY_QUEUE_TEXT }
-      let queried = arcades
-      if (requestedName) {
-        const normalizedName = requestedName.toLocaleLowerCase()
-        queried = arcades.filter(arcade => (
+    if (!arcades?.length) return { type: 'empty', text: EMPTY_QUEUE_TEXT }
+
+    const requestedName = compact(rawName).toLocaleLowerCase()
+    const queried = requestedName
+      ? arcades.filter(arcade => (
           [arcade.name, ...arcade.aliases].some(alias => (
-            compact(alias).toLocaleLowerCase() === normalizedName
+            compact(alias).toLocaleLowerCase() === requestedName
           ))
         ))
-        if (queried.length !== 1) return null
-      }
-      return {
-        type: 'query',
-        arcades: queried,
-        text: formatQuery(queried, now),
-      }
+      : arcades
+    if (queried.length !== (requestedName ? 1 : arcades.length)) return null
+    return {
+      type: 'query',
+      arcades: queried,
+      text: formatQuery(queried, now),
     }
+  }
+
+  async updateCount(
+    channelId: string,
+    rawName: string,
+    rawCount: string,
+  ): Promise<QueueMessageResult | null> {
+    const mutation = parseCountMutation(rawCount)
+    if (!mutation) return null
+    const now = this.options.now?.() ?? new Date()
+    const arcades = await this.repository.list(channelId, now)
     if (!arcades?.length) return null
-    const normalizedContent = content.toLocaleLowerCase()
-    if (arcades.some(arcade => arcade.aliases.some(alias => (
-      compact(alias).toLocaleLowerCase() === normalizedContent
-    )))) return null
-    const candidates = arcades.flatMap(arcade => (
-      arcade.aliases.map(alias => countCandidate(arcade, alias, content)).filter(
-        (candidate): candidate is CountCandidate => candidate !== null,
-      )
+
+    const requestedName = compact(rawName).toLocaleLowerCase()
+    if (!requestedName) return null
+    const candidates = arcades.filter(arcade => (
+      [arcade.name, ...arcade.aliases].some(alias => (
+        compact(alias).toLocaleLowerCase() === requestedName
+      ))
     ))
     if (candidates.length !== 1) return null
-    const candidate = candidates[0]
+
     const result = await this.repository.mutateCount(
       channelId,
-      candidate.arcade.name,
-      candidate.mutation,
+      candidates[0].name,
+      mutation,
       now,
       50,
     )

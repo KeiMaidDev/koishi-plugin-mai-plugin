@@ -75,7 +75,8 @@ export interface CoreCommandDependencies {
     | 'deleteAlias'
     | 'aliases'
     | 'bindGroup'
-    | 'handleMessage'
+    | 'query'
+    | 'updateCount'
   >
   updateService?: Pick<
     UpdateService,

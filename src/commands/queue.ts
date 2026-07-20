@@ -1,4 +1,4 @@
-import type { Command, Context, Middleware } from 'koishi'
+import type { Command, Context } from 'koishi'
 import { isAdministrator } from '../platform/admin'
 import {
   QueueServiceError,
@@ -21,7 +21,8 @@ type QueueServicePort = Pick<
   | 'deleteAlias'
   | 'aliases'
   | 'bindGroup'
-  | 'handleMessage'
+  | 'query'
+  | 'updateCount'
 >
 
 export interface QueueCommandDependencies extends ReplyCommandDependencies {
@@ -37,7 +38,9 @@ export interface QueueCommandRegistration {
 export const QUEUE_HELP_TEXT = [
   '## 舞萌DX',
   '本功能可以提供机厅人数查询及更新功能。',
-  '支持的功能命令如下：',
+  '查询人数：/mai 排卡管理 查询人数 [机厅名称]',
+  '更新人数：/mai 排卡管理 更新人数 <机厅名称> <人数或增量>',
+  '支持的管理命令如下：',
 ].join('\n')
 
 const queueActionRows: readonly (readonly QqCommandGuidanceButton[])[] = [
@@ -51,14 +54,23 @@ const queueActionRows: readonly (readonly QqCommandGuidanceButton[])[] = [
     queueAction('queue-delete-alias', '删除别名', '删除别名'),
     queueAction('queue-bind-group', '添加分组', '添加分组'),
   ],
+  [
+    queueAction('queue-query-count', '查询人数', '查询人数', true),
+    queueAction('queue-update-count', '更新人数', '更新人数'),
+  ],
 ]
 
-function queueAction(id: string, label: string, operation: string): QqCommandGuidanceButton {
+function queueAction(
+  id: string,
+  label: string,
+  operation: string,
+  enter = false,
+): QqCommandGuidanceButton {
   return {
     id,
     label,
     command: `/mai 排卡管理 ${operation}`,
-    enter: false,
+    enter,
     reply: false,
   }
 }
@@ -69,16 +81,6 @@ function queueMenu(content: string) {
 
 function queueOperation(content: string, id: string, label: string, operation: string) {
   return createQqCommandGuidance(content, [[queueAction(id, label, operation)]])
-}
-
-function queueStatus(content: string) {
-  return createQqCommandGuidance(content, [[{
-    id: 'queue-manage',
-    label: '排卡管理',
-    command: '/mai 排卡管理',
-    enter: true,
-    reply: false,
-  }]])
 }
 
 async function administratorSubject(session: ActiveCommandSession) {
@@ -97,6 +99,31 @@ async function administratorSubject(session: ActiveCommandSession) {
   }
 }
 
+async function queryQueue(
+  session: ActiveCommandSession,
+  dependencies: QueueCommandDependencies,
+  name = '',
+) {
+  if (session.isDirect) {
+    await replyText(session, dependencies, '机厅人数查询仅支持群聊。')
+    return
+  }
+  try {
+    const result = await dependencies.queueService.query(session.channelId, name)
+    if (!result || result.type === 'updated' || result.type === 'too-large') {
+      await replyText(session, dependencies, '未找到对应机厅。', queueMenu('未找到对应机厅。'))
+      return
+    }
+    await replyText(session, dependencies, result.text, queueMenu(result.text))
+  } catch (error) {
+    if (error instanceof QueueServiceError) {
+      await replyText(session, dependencies, error.message, queueMenu(error.message))
+      return
+    }
+    throw error
+  }
+}
+
 async function manageQueue(
   session: ActiveCommandSession,
   dependencies: QueueCommandDependencies,
@@ -106,15 +133,48 @@ async function manageQueue(
     await replyText(session, dependencies, '排卡管理仅支持群聊。')
     return
   }
+  const [operation, name, alias] = raw.trim().split(/\s+/u)
+  if (!operation) {
+    await replyText(session, dependencies, QUEUE_HELP_TEXT, queueMenu(QUEUE_HELP_TEXT))
+    return
+  }
+  if (operation === '查询人数') {
+    await queryQueue(session, dependencies, name)
+    return
+  }
   if (!isAdministrator(await administratorSubject(session), {
     administrators: dependencies.administrators,
   })) {
     await replyText(session, dependencies, '权限不足。')
     return
   }
-  const [operation, name, alias] = raw.trim().split(/\s+/u)
   try {
     switch (operation) {
+      case '更新人数': {
+        if (!name || !alias) {
+          const text = '请填写机厅名称和人数，例如：/mai 排卡管理 更新人数 jt +1'
+          await replyText(session, dependencies, text, queueOperation(
+            text,
+            'queue-update-count-input',
+            '填写机厅和人数',
+            '更新人数',
+          ))
+          return
+        }
+        const result = await dependencies.queueService.updateCount(
+          session.channelId,
+          name,
+          alias,
+        )
+        if (!result || result.type === 'query' || result.type === 'empty') {
+          await replyText(session, dependencies, '未找到对应机厅或人数格式不正确。', queueMenu(
+            '未找到对应机厅或人数格式不正确。',
+          ))
+          return
+        }
+        await replyText(session, dependencies, result.text, queueMenu(result.text))
+        return
+      }
       case '添加机厅':
         if (!name) {
           const text = '请填写机厅名称'
@@ -213,49 +273,28 @@ async function manageQueue(
   }
 }
 
-export function createQueueMiddleware(
-  dependencies: QueueCommandDependencies,
-): Middleware {
-  return async (session, next) => {
-    if (!session.userId || !session.channelId || session.userId === session.selfId) return next()
-    if (session.isDirect || session.event.user?.isBot) return next()
-    const content = session.content?.trim() ?? ''
-    if (!content) return next()
-    let result
-    try {
-      result = await dependencies.queueService.handleMessage(session.channelId, content)
-    } catch (error) {
-      if (error instanceof QueueServiceError) return next()
-      throw error
-    }
-    if (!result) return next()
-    await replyText(
-      session as ActiveCommandSession,
-      dependencies,
-      result.text,
-      queueStatus(result.text),
-    )
-  }
-}
-
 export function registerQueueCommands(
   ctx: Context,
   dependencies: QueueCommandDependencies,
 ): QueueCommandRegistration {
+  const queryCommand = ctx.command('mai.queue.query [name:string]', '查询机厅人数')
+    .shortcut(/^\/mai\s+排卡管理\s+查询人数(?:\s+(\S+))?$/u, { args: ['$1'] })
+    .action(commandAction(async ({ session }, name = '') => {
+      await queryQueue(session, dependencies, name)
+    }))
   const command = ctx.command('mai.queue [input:text]', '管理机厅排卡')
     .shortcut(/^\/mai\s+排卡管理(?:\s+(.*))?$/u, { args: ['$1'] })
     .action(commandAction(async ({ session }, input = '') => {
       await manageQueue(session, dependencies, input)
     }))
-  const disposeMiddleware = ctx.middleware(createQueueMiddleware(dependencies), false)
   let disposed = false
 
   return {
-    commands: [command],
+    commands: [queryCommand, command],
     async dispose() {
       if (disposed) return
       disposed = true
-      disposeMiddleware()
+      queryCommand.dispose()
       command.dispose()
     },
   }

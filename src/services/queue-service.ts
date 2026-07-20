@@ -157,7 +157,7 @@ function formatQuery(arcades: ArcadeSnapshot[], now: Date) {
   ].join('\n')
 }
 
-const EMPTY_QUEUE_TEXT = '当前群未设置机厅，请使用“@可怜BOT /排卡管理 添加机厅”来添加机厅。'
+const EMPTY_QUEUE_TEXT = '当前群未设置机厅，请先添加机厅。'
 
 function countCandidate(
   arcade: ArcadeSnapshot,

@@ -8,7 +8,7 @@ import {
   createQqButton,
   createQqButtonRow,
   createQqCommandAction,
-  createPagedCallbackButtons,
+  createPagedCommandButtons,
   createQqKeyboard,
   createQqNativeMarkdown,
 } from '../platform/qq-message'
@@ -180,7 +180,7 @@ async function createScoreListPage(
     newCount: 0,
   })
   const text = `${currentPage} / ${totalPages}`
-  const row = createPagedCallbackButtons({
+  const row = createPagedCommandButtons({
     page: currentPage,
     totalPages,
     pageCommand: page => scoreListPageCommand(filter, page),

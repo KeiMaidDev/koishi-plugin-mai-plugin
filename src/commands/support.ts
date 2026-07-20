@@ -177,45 +177,14 @@ interface ActiveCommandArgv {
   options: Record<string, any>
 }
 
-interface QqButtonSessionInternal {
-  id?: string
-}
-
-interface QqButtonEventData {
-  id?: unknown
-  d?: {
-    timestamp?: unknown
-  }
-}
-
-function prepareButtonReplySession(session: Session) {
-  if (session.type !== 'interaction/button') return
-  const qq = (session as Session & { qq?: QqButtonSessionInternal }).qq
-  const event = session.event as typeof session.event & { _data?: QqButtonEventData }
-  const eventId = event._data?.id
-  if (qq && typeof eventId === 'string' && eventId) qq.id = eventId
-
-  const eventTimestamp = event._data?.d?.timestamp
-  const timestamp = typeof eventTimestamp === 'string'
-    ? Date.parse(eventTimestamp)
-    : typeof eventTimestamp === 'number'
-      ? eventTimestamp
-      : Number.NaN
-  if (Number.isFinite(timestamp)) session.timestamp = timestamp
-}
-
 export function commandAction(
   callback: (argv: ActiveCommandArgv, ...args: any[]) => Awaitable<void | Fragment>,
 ): Command.Action {
   return (argv, ...args) => {
     const session = argv.session
-    const button = session?.event.button as { data?: unknown } | undefined
-    const content = session?.content ?? button?.data
-    if (!session?.userId || !session.channelId || typeof content !== 'string') {
-      throw new Error('[mai-plugin] command action requires a message or button session.')
+    if (!session?.userId || !session.channelId || session.content === undefined) {
+      throw new Error('[mai-plugin] command action requires a message session.')
     }
-    if (session.content === undefined) session.content = content
-    prepareButtonReplySession(session)
     return callback({
       ...argv,
       session: session as ActiveCommandSession,

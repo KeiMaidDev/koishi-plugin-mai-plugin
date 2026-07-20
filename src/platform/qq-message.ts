@@ -83,7 +83,7 @@ export interface QqTemplateMarkdownOptions {
   keyboard?: QqKeyboard
 }
 
-export interface PagedCallbackButtonOptions {
+export interface PagedCommandButtonOptions {
   page: number
   totalPages: number
   pageCommand(page: number): string
@@ -263,26 +263,24 @@ export function createInlineCommandLink(
   return `[${escapeInlineCommandLabel(label)}](${url})`
 }
 
-export function createPagedCallbackButtons(
-  options: PagedCallbackButtonOptions,
+export function createPagedCommandButtons(
+  options: PagedCommandButtonOptions,
 ): QqButtonRow {
   const buttons: QqButton[] = []
   if (options.page > 1) {
     buttons.push(createQqButton(
       `page-${options.page - 1}`,
       options.previousLabel ?? '上一页',
-      createQqCallbackAction(options.pageCommand(options.page - 1)),
+      createQqCommandAction(options.pageCommand(options.page - 1), { enter: true }),
       1,
-      null,
     ))
   }
   if (options.page < options.totalPages) {
     buttons.push(createQqButton(
       `page-${options.page + 1}`,
       options.nextLabel ?? '下一页',
-      createQqCallbackAction(options.pageCommand(options.page + 1)),
+      createQqCommandAction(options.pageCommand(options.page + 1), { enter: true }),
       1,
-      null,
     ))
   }
   return buttons.length ? createQqButtonRow(buttons) : { buttons }

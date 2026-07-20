@@ -8,7 +8,7 @@ import type { ChartInfo, MusicInfo } from '../domain/music'
 import { isAdministrator } from '../platform/admin'
 import { transformAssetImageUrl } from '../platform/qq-markdown-image'
 import {
-  createPagedCallbackButtons,
+  createPagedCommandButtons,
   createInlineCommandLink,
   createQqButton,
   createQqButtonRow,
@@ -376,7 +376,7 @@ async function createSearchPage(
     '',
     ...pageResults.map((result, index) => resultMarkdown(result, coverUrls[index])),
   ].join('\n')
-  const row = createPagedCallbackButtons({
+  const row = createPagedCommandButtons({
     page: view.currentPage,
     totalPages: view.totalPages,
     pageCommand,

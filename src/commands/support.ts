@@ -182,9 +182,12 @@ export function commandAction(
 ): Command.Action {
   return (argv, ...args) => {
     const session = argv.session
-    if (!session?.userId || !session.channelId || session.content === undefined) {
-      throw new Error('[mai-plugin] command action requires a message session.')
+    const button = session?.event.button as { data?: unknown } | undefined
+    const content = session?.content ?? button?.data
+    if (!session?.userId || !session.channelId || typeof content !== 'string') {
+      throw new Error('[mai-plugin] command action requires a message or button session.')
     }
+    if (session.content === undefined) session.content = content
     return callback({
       ...argv,
       session: session as ActiveCommandSession,

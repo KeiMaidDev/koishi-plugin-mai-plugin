@@ -183,7 +183,9 @@ interface QqButtonSessionInternal {
 
 interface QqButtonEventData {
   id?: unknown
-  timestamp?: unknown
+  d?: {
+    timestamp?: unknown
+  }
 }
 
 function prepareButtonReplySession(session: Session) {
@@ -193,7 +195,7 @@ function prepareButtonReplySession(session: Session) {
   const eventId = event._data?.id
   if (qq && typeof eventId === 'string' && eventId) qq.id = eventId
 
-  const eventTimestamp = event._data?.timestamp
+  const eventTimestamp = event._data?.d?.timestamp
   const timestamp = typeof eventTimestamp === 'string'
     ? Date.parse(eventTimestamp)
     : typeof eventTimestamp === 'number'

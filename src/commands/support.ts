@@ -179,19 +179,21 @@ interface ActiveCommandArgv {
 
 interface QqButtonSessionInternal {
   id?: string
-  _data?: {
-    id?: unknown
-    timestamp?: unknown
-  }
+}
+
+interface QqButtonEventData {
+  id?: unknown
+  timestamp?: unknown
 }
 
 function prepareButtonReplySession(session: Session) {
   if (session.type !== 'interaction/button') return
   const qq = (session as Session & { qq?: QqButtonSessionInternal }).qq
-  const eventId = qq?._data?.id
+  const event = session.event as typeof session.event & { _data?: QqButtonEventData }
+  const eventId = event._data?.id
   if (qq && typeof eventId === 'string' && eventId) qq.id = eventId
 
-  const eventTimestamp = qq?._data?.timestamp
+  const eventTimestamp = event._data?.timestamp
   const timestamp = typeof eventTimestamp === 'string'
     ? Date.parse(eventTimestamp)
     : typeof eventTimestamp === 'number'

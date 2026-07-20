@@ -362,9 +362,8 @@ function resultMarkdown(result: MusicSearchResult, coverUrl: string | null) {
 async function createSearchPage(
   dependencies: CoreCommandDependencies,
   results: readonly MusicSearchResult[],
-  query: string,
   page: number,
-  channelId: string,
+  pageCommand: (page: number) => string,
 ) {
   const view = pageText(results, page)
   const start = (view.currentPage - 1) * SEARCH_PAGE_SIZE
@@ -377,21 +376,10 @@ async function createSearchPage(
     '',
     ...pageResults.map((result, index) => resultMarkdown(result, coverUrls[index])),
   ].join('\n')
-  const callbackData = (targetPage: number) => dependencies.callbackRouter.registerPagination({
-    payload: { mode: 'search', query, page: targetPage },
-    expectedChannelId: channelId,
-    handler: async payload => (await createSearchPage(
-      dependencies,
-      results,
-      payload.query,
-      payload.page,
-      channelId,
-    )).rich,
-  })
   const row = createPagedCallbackButtons({
     page: view.currentPage,
     totalPages: view.totalPages,
-    callbackData,
+    pageCommand,
   })
   return {
     ...view,
@@ -406,8 +394,8 @@ async function showResults(
   session: ActiveCommandSession,
   dependencies: CoreCommandDependencies,
   results: readonly MusicSearchResult[],
-  query: string,
-  page = 1,
+  page: number,
+  pageCommand: (page: number) => string,
 ) {
   if (!results.length) {
     await replyText(session, dependencies, NOT_FOUND)
@@ -423,14 +411,26 @@ async function showResults(
     return
   }
 
-  const view = await createSearchPage(
-    dependencies,
-    results,
-    query,
-    page,
-    session.channelId,
-  )
+  const view = await createSearchPage(dependencies, results, page, pageCommand)
   await replyText(session, dependencies, view.text, view.rich)
+}
+
+interface PagedInput {
+  input: string
+  page: number
+  explicitPage: boolean
+}
+
+function parsePagedInput(raw: string): PagedInput | null {
+  const match = raw.trim().match(/^(.*?)(?:\s+--page\s+(\d+))?$/u)
+  if (!match) return null
+  const page = Number(match[2] ?? 1)
+  if (!Number.isSafeInteger(page) || page < 1) return null
+  return { input: match[1].trim(), page, explicitPage: match[2] !== undefined }
+}
+
+function musicPageCommand(command: string, input: string, page: number) {
+  return `/mai ${command}${input ? ` ${input}` : ''} --page ${page}`
 }
 
 function parseLevelRange(raw: string) {
@@ -632,8 +632,19 @@ export function registerMusicCommands(
     '按曲名或别名查歌',
     /^\/mai\s+查歌(?:\s+(.*))?$/,
     async (session, raw) => {
-      const results = raw.trim() ? await dependencies.aliasService.search(raw) : []
-      await showResults(session, dependencies, results, raw)
+      const paged = parsePagedInput(raw)
+      if (!paged) {
+        await replyText(session, dependencies, '请输入正确的页数。')
+        return
+      }
+      const results = paged.input ? await dependencies.aliasService.search(paged.input) : []
+      await showResults(
+        session,
+        dependencies,
+        results,
+        paged.page,
+        page => musicPageCommand('查歌', paged.input, page),
+      )
     },
   ))
 
@@ -643,15 +654,26 @@ export function registerMusicCommands(
     '按谱面定数查歌',
     /^\/mai\s+定数查歌(?:\s+(.*))?$/,
     async (session, raw) => {
-      const range = parseLevelRange(raw)
+      const paged = parsePagedInput(raw)
+      const range = paged && parseLevelRange(paged.input)
       if (!range) {
         await replyText(session, dependencies, LEVEL_USAGE)
         return
       }
+      const page = paged.explicitPage ? paged.page : range.page
+      const input = range.begin === range.end
+        ? String(range.begin)
+        : String(range.begin) + '-' + String(range.end)
       const charts = [...dependencies.data.musics.values()].flatMap(music => music.charts)
         .filter(chart => chart.difficulty !== MusicDifficulty.Utage)
         .filter(chart => chart.levelValue >= range.begin && chart.levelValue <= range.end)
-      await showResults(session, dependencies, charts, raw, range.page)
+      await showResults(
+        session,
+        dependencies,
+        charts,
+        page,
+        targetPage => musicPageCommand('定数查歌', input, targetPage),
+      )
     },
   ))
 
@@ -661,15 +683,26 @@ export function registerMusicCommands(
     '按拟合定数查歌',
     /^\/mai\s+拟合定数查歌(?:\s+(.*))?$/,
     async (session, raw) => {
-      const range = parseLevelRange(raw)
+      const paged = parsePagedInput(raw)
+      const range = paged && parseLevelRange(paged.input)
       if (!range) {
         await replyText(session, dependencies, FIT_LEVEL_USAGE)
         return
       }
+      const page = paged.explicitPage ? paged.page : range.page
+      const input = range.begin === range.end
+        ? String(range.begin)
+        : String(range.begin) + '-' + String(range.end)
       const charts = [...dependencies.data.musics.values()].flatMap(music => music.charts)
         .filter(chart => chart.difficulty !== MusicDifficulty.Utage)
         .filter(chart => chart.fitLevelValue >= range.begin && chart.fitLevelValue <= range.end)
-      await showResults(session, dependencies, charts, raw, range.page)
+      await showResults(
+        session,
+        dependencies,
+        charts,
+        page,
+        targetPage => musicPageCommand('拟合定数查歌', input, targetPage),
+      )
     },
   ))
 
@@ -678,6 +711,7 @@ export function registerMusicCommands(
       definition: 'mai.designer-search <query:text>',
       description: '按谱师查歌',
       pattern: /^\/mai\s+谱师查歌(?:\s+(.*))?$/,
+      command: '谱师查歌',
       search: (query: string) => [...dependencies.data.musics.values()].flatMap(music => music.charts)
         .filter(chart => chart.notesDesigner.toLocaleLowerCase().includes(query.toLocaleLowerCase())),
     },
@@ -685,6 +719,7 @@ export function registerMusicCommands(
       definition: 'mai.version-search <query:text>',
       description: '按版本查歌',
       pattern: /^\/mai\s+版本查歌(?:\s+(.*))?$/,
+      command: '版本查歌',
       search: (query: string) => [...dependencies.data.musics.values()]
         .filter(music => music.version.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())),
     },
@@ -692,6 +727,7 @@ export function registerMusicCommands(
       definition: 'mai.artist-search <query:text>',
       description: '按曲师查歌',
       pattern: /^\/mai\s+曲师查歌(?:\s+(.*))?$/,
+      command: '曲师查歌',
       search: (query: string) => [...dependencies.data.musics.values()]
         .filter(music => music.artist.toLocaleLowerCase().includes(query.toLocaleLowerCase())),
     },
@@ -703,8 +739,18 @@ export function registerMusicCommands(
       search.description,
       search.pattern,
       async (session, raw) => {
-        const query = raw.trim()
-        await showResults(session, dependencies, query ? search.search(query) : [], query)
+        const paged = parsePagedInput(raw)
+        if (!paged) {
+          await replyText(session, dependencies, '请输入正确的页数。')
+          return
+        }
+        await showResults(
+          session,
+          dependencies,
+          paged.input ? search.search(paged.input) : [],
+          paged.page,
+          page => musicPageCommand(search.command, paged.input, page),
+        )
       },
     ))
   }
@@ -715,7 +761,12 @@ export function registerMusicCommands(
     '按安全正则表达式查歌',
     /^\/mai\s+正则查歌(?:\s+(.*))?$/,
     async (session, raw) => {
-      const validated = validateUserRegex(raw.trim())
+      const paged = parsePagedInput(raw)
+      if (!paged) {
+        await replyText(session, dependencies, '请输入正确的页数。')
+        return
+      }
+      const validated = validateUserRegex(paged.input)
       if ('error' in validated) {
         await replyText(session, dependencies, validated.error)
         return
@@ -739,7 +790,13 @@ export function registerMusicCommands(
         return
       }
       const results = execution.matches.map(index => musics[index])
-      await showResults(session, dependencies, results, raw)
+      await showResults(
+        session,
+        dependencies,
+        results,
+        paged.page,
+        page => musicPageCommand('正则查歌', paged.input, page),
+      )
     },
   ))
 
@@ -749,15 +806,24 @@ export function registerMusicCommands(
     '按 BPM 查歌',
     /^\/mai\s+(?:BPM|bpm)查歌(?:\s+(.*))?$/,
     async (session, raw) => {
-      const [bpmText, pageText] = raw.trim().split(/\s+/, 2)
+      const paged = parsePagedInput(raw)
+      const [bpmText, legacyPageText] = paged?.input.split(/\s+/, 2) ?? []
       const bpm = Number(bpmText)
-      const page = pageText === undefined ? 1 : Number(pageText)
-      if (!Number.isSafeInteger(bpm) || bpm <= 0 || !Number.isSafeInteger(page) || page < 1) {
+      const legacyPage = legacyPageText === undefined ? 1 : Number(legacyPageText)
+      const page = paged?.explicitPage ? paged.page : legacyPage
+      if (!paged || !Number.isSafeInteger(bpm) || bpm <= 0
+        || !Number.isSafeInteger(page) || page < 1) {
         await replyText(session, dependencies, '请输入正确的 BPM 值和页数。')
         return
       }
       const results = [...dependencies.data.musics.values()].filter(music => music.bpm === bpm)
-      await showResults(session, dependencies, results, raw, page)
+      await showResults(
+        session,
+        dependencies,
+        results,
+        page,
+        targetPage => musicPageCommand('BPM查歌', String(bpm), targetPage),
+      )
     },
   ))
 
@@ -767,13 +833,20 @@ export function registerMusicCommands(
     '按随心配组合条件查歌',
     /^\/mai\s+搜索(?:\s+(.*))?$/,
     async (session, raw) => {
-      const filters = parseComboQuery(raw)
+      const paged = parsePagedInput(raw)
+      const filters = paged && parseComboQuery(paged.input)
       const results = filters ? (
         filters.some(filter => filter.singleChart)
           ? filterCharts(filters, dependencies.data.musics.values())
           : filterMusics(filters, dependencies.data.musics.values())
       ) : []
-      await showResults(session, dependencies, results, raw)
+      await showResults(
+        session,
+        dependencies,
+        results,
+        paged?.page ?? 1,
+        page => musicPageCommand('搜索', paged?.input ?? '', page),
+      )
     },
   ))
 

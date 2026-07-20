@@ -17,7 +17,6 @@ import {
   type AssetTransformer,
 } from '../platform/qq-markdown-image'
 import type { QqKeyboard } from '../platform/qq-message'
-import type { CommandCallbackRouter } from '../platform/command-router'
 import type { MaiRenderer } from '../render/mai-renderer'
 import type { AliasService } from '../services/alias-service'
 import type { QueryService } from '../services/query-service'
@@ -92,7 +91,6 @@ export interface CoreCommandDependencies {
     | 'dispose'
   >
   renderer: MaiRenderer
-  callbackRouter: CommandCallbackRouter
   assetTransformer?: AssetTransformer
   administrators?: readonly string[]
   compatibilityMode?: boolean

@@ -12,7 +12,6 @@ import { MaimaiDataSyncService, type MaimaiDataSyncOptions } from './data/sync-s
 import { registerMaiDatabaseModels } from './database/models'
 import { MaiRepositories } from './database/repositories'
 import { PlayerSettings } from './domain/player'
-import { CommandCallbackRouter } from './platform/command-router'
 import { DivingFishProvider } from './providers/diving-fish'
 import { LxnsProvider } from './providers/lxns'
 import { ProviderChain } from './providers/provider-chain'
@@ -87,7 +86,6 @@ export * from './commands/settings'
 export * from './commands/update'
 export * from './commands/support'
 export * from './platform/admin'
-export * from './platform/command-router'
 export * from './platform/fallback-message'
 export * from './platform/qq-markdown-image'
 export * from './platform/qq-message'
@@ -288,7 +286,6 @@ export async function createDefaultCommandDependencies(
     guessService,
     settingRepository: repositories.setting,
     renderer: new TakumiMaiRenderer(services.renderer, data),
-    callbackRouter: new CommandCallbackRouter(),
     assetTransformer: typeof transform === 'function'
       ? { transform: content => transform.call(assets, content) }
       : undefined,

@@ -1,4 +1,4 @@
-import type { Command, Context, Fragment, Middleware, Session } from 'koishi'
+import type { Command, Context, Middleware, Session } from 'koishi'
 import { registerCalcCommands } from './calc'
 import { registerGuessCommands } from './guess'
 import { registerHelpCommand } from './help'
@@ -199,20 +199,6 @@ export interface CoreCommandRegistration {
   dispose(): Promise<void>
 }
 
-async function dispatchButtonCallback(
-  session: Session,
-  dependencies: CoreCommandDependencies,
-) {
-  const token = session.event.button?.id
-  if (!token?.startsWith('mai:') || !session.userId || !session.channelId) return
-  const result = await dependencies.callbackRouter.dispatch(token, {
-    userId: session.userId,
-    channelId: session.channelId,
-  })
-  if (!result.ok || result.value === undefined || result.value === null) return
-  await session.send(result.value as Fragment)
-}
-
 export function registerCoreCommands(
   ctx: Context,
   dependencies: CoreCommandDependencies,
@@ -263,9 +249,6 @@ export function registerCoreCommands(
     ...regularCommands,
   ]
   const disposeMiddleware = ctx.middleware(createCompatibilityMiddleware(commandDependencies))
-  const disposeCallbacks = ctx.on('interaction/button', session => (
-    dispatchButtonCallback(session, commandDependencies)
-  ))
   let disposed = false
 
   return {
@@ -274,9 +257,7 @@ export function registerCoreCommands(
       if (disposed) return
       disposed = true
       disposeMiddleware()
-      disposeCallbacks()
       for (const command of [...regularCommands].reverse()) command.dispose()
-      dependencies.callbackRouter.clear()
       await queueRegistration?.dispose()
       await guessRegistration?.dispose()
     },

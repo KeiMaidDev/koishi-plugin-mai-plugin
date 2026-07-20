@@ -83,7 +83,7 @@ export interface QqTemplateMarkdownOptions {
 export interface PagedCallbackButtonOptions {
   page: number
   totalPages: number
-  callbackData(page: number): string
+  pageCommand(page: number): string
   previousLabel?: string
   nextLabel?: string
 }
@@ -266,7 +266,7 @@ export function createPagedCallbackButtons(
     buttons.push(createQqButton(
       `page-${options.page - 1}`,
       options.previousLabel ?? '上一页',
-      createQqCallbackAction(options.callbackData(options.page - 1)),
+      createQqCallbackAction(options.pageCommand(options.page - 1)),
       0,
     ))
   }
@@ -274,7 +274,7 @@ export function createPagedCallbackButtons(
     buttons.push(createQqButton(
       `page-${options.page + 1}`,
       options.nextLabel ?? '下一页',
-      createQqCallbackAction(options.callbackData(options.page + 1)),
+      createQqCallbackAction(options.pageCommand(options.page + 1)),
       0,
     ))
   }

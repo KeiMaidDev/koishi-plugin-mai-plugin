@@ -153,6 +153,11 @@ function ratingRenderInput(
   }
 }
 
+function scoreListPageCommand(filter: string, page: number) {
+  const normalized = filter.trim()
+  return `/mai ${normalized ? `${normalized} ` : ''}成绩列表 ${page}`
+}
+
 async function createScoreListPage(
   dependencies: CoreCommandDependencies,
   response: RecordsResponse,
@@ -160,7 +165,6 @@ async function createScoreListPage(
   records: readonly RecordEntry[],
   filter: string,
   requestedPage: number,
-  channelId: string,
 ) {
   const totalPages = Math.max(1, Math.ceil(records.length / SCORE_LIST_PAGE_SIZE))
   const currentPage = Math.min(Math.max(1, requestedPage), totalPages)
@@ -179,30 +183,11 @@ async function createScoreListPage(
   const row = createPagedCallbackButtons({
     page: currentPage,
     totalPages,
-    callbackData: page => dependencies.callbackRouter.registerPagination({
-      payload: { mode: 'score-list', filter, page },
-      expectedChannelId: channelId,
-      handler: async payload => (
-        await createScoreListPage(
-          dependencies,
-          response,
-          backend,
-          records,
-          payload.filter,
-          payload.page,
-          channelId,
-        )
-      ).callbackReply,
-    }),
+    pageCommand: page => scoreListPageCommand(filter, page),
   })
   const keyboard = row.buttons.length ? createQqKeyboard([row]) : undefined
   const rich = createQqNativeMarkdown(text, keyboard)
-  return {
-    image,
-    text,
-    rich,
-    callbackReply: [h.image(Buffer.from(image), 'image/png'), rich],
-  }
+  return { image, text, rich }
 }
 
 function chartKey(chart: ChartInfo) {
@@ -453,7 +438,6 @@ export function registerImageCommands(
           records,
           filterText,
           page,
-          session.channelId,
         )
         await replyImage(
           session,

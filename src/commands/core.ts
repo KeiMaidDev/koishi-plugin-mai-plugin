@@ -10,6 +10,7 @@ import { registerSettingsCommands } from './settings'
 import { registerUpdateCommands } from './update'
 import type { CoreCommandDependencies } from './support'
 import { parseComboQuery } from '../query/combo-parser'
+import { resolveQqCommandCallbackData } from '../platform/qq-message'
 
 export type { CoreCommandDependencies } from './support'
 
@@ -199,6 +200,17 @@ export interface CoreCommandRegistration {
   dispose(): Promise<void>
 }
 
+async function dispatchQqCommandCallback(session: Session) {
+  const button = session.event.button as { data?: unknown } | undefined
+  const command = resolveQqCommandCallbackData(button?.data)
+  if (!command || !session.userId || !session.channelId) return
+  const execution = resolvePendingCommandExecution(command)
+  if (!execution) return
+
+  session.content = command
+  await session.execute(execution)
+}
+
 export function registerCoreCommands(
   ctx: Context,
   dependencies: CoreCommandDependencies,
@@ -249,6 +261,7 @@ export function registerCoreCommands(
     ...regularCommands,
   ]
   const disposeMiddleware = ctx.middleware(createCompatibilityMiddleware(commandDependencies))
+  const disposeCallbacks = ctx.on('interaction/button', dispatchQqCommandCallback)
   let disposed = false
 
   return {
@@ -257,6 +270,7 @@ export function registerCoreCommands(
       if (disposed) return
       disposed = true
       disposeMiddleware()
+      disposeCallbacks()
       for (const command of [...regularCommands].reverse()) command.dispose()
       await queueRegistration?.dispose()
       await guessRegistration?.dispose()

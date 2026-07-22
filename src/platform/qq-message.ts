@@ -91,6 +91,8 @@ export interface PagedCommandButtonOptions {
   nextLabel?: string
 }
 
+export type PagedCallbackButtonOptions = PagedCommandButtonOptions
+
 export interface ReplySession {
   platform: string
   send(content: h.Fragment): Promise<unknown>
@@ -217,6 +219,22 @@ function nonEmpty(value: string, field: string) {
   return normalized
 }
 
+const qqCommandCallbackPrefix = 'mai:command:'
+
+export function createQqCommandCallbackData(command: string) {
+  return `${qqCommandCallbackPrefix}${commandData(command)}`
+}
+
+export function resolveQqCommandCallbackData(data: unknown) {
+  if (typeof data !== 'string' || !data.startsWith(qqCommandCallbackPrefix)) return null
+  const command = data.slice(qqCommandCallbackPrefix.length)
+  try {
+    return commandData(command)
+  } catch {
+    return null
+  }
+}
+
 function commandData(data: string) {
   if (!data.trim()) throw new TypeError('QQ command data must be non-empty.')
   if (data !== data.trimStart()) {
@@ -261,6 +279,31 @@ export function createInlineCommandLink(
 ) {
   const url = `mqqapi://aio/inlinecmd?command=${encodeURIComponent(command)}&enter=${enter}&reply=false`
   return `[${escapeInlineCommandLabel(label)}](${url})`
+}
+
+export function createPagedCallbackButtons(
+  options: PagedCallbackButtonOptions,
+): QqButtonRow {
+  const buttons: QqButton[] = []
+  if (options.page > 1) {
+    buttons.push(createQqButton(
+      `page-${options.page - 1}`,
+      options.previousLabel ?? '上一页',
+      createQqCallbackAction(createQqCommandCallbackData(options.pageCommand(options.page - 1))),
+      1,
+      null,
+    ))
+  }
+  if (options.page < options.totalPages) {
+    buttons.push(createQqButton(
+      `page-${options.page + 1}`,
+      options.nextLabel ?? '下一页',
+      createQqCallbackAction(createQqCommandCallbackData(options.pageCommand(options.page + 1))),
+      1,
+      null,
+    ))
+  }
+  return buttons.length ? createQqButtonRow(buttons) : { buttons }
 }
 
 export function createPagedCommandButtons(

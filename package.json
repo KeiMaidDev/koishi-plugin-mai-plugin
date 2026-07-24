@@ -27,7 +27,7 @@
   ],
   "koishi": {
     "description": {
-      "zh": "舞萌 DX 查分、图片渲染、落雪 OAuth 绑定与猜歌插件。"
+      "zh": "适配qq官机的舞萌 DX 功能插件"
     },
     "service": {
       "required": [

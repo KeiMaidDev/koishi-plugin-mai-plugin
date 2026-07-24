@@ -38,8 +38,6 @@ export interface QueueCommandRegistration {
 export const QUEUE_HELP_TEXT = [
   '## 舞萌DX',
   '本功能可以提供机厅人数查询及更新功能。',
-  '查询人数：/mai 排卡管理 查询人数 [机厅名称]',
-  '更新人数：/mai 排卡管理 更新人数 <机厅名称> <人数或增量>',
   '支持的管理命令如下：',
 ].join('\n')
 

@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-mai-plugin",
   "description": "Koishi maimai DX query, rendering, OAuth binding, and guessing plugin.",
-  "version": "0.0.1",
+  "version": "1.0.1",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [
@@ -13,7 +13,7 @@
   "homepage": "https://github.com/KeiMaidDev/koishi-plugin-mai-plugin#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/KeiMaidDev/koishi-plugin-mai-plugin.git"
+    "url": "git+https://github.com/KeiMaidDev/koishi-plugin-mai-plugin.git"
   },
   "bugs": {
     "url": "https://github.com/KeiMaidDev/koishi-plugin-mai-plugin/issues"

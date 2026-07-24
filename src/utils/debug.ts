@@ -1,8 +1,18 @@
-export type DebugValue = string | number | boolean | null
+import { inspect } from 'node:util'
+
+export type DebugValue = unknown
 
 export interface DebugLogSink {
   info(message: string): void
 }
+
+const inspectOptions = {
+  depth: null,
+  maxArrayLength: null,
+  maxStringLength: null,
+  breakLength: 120,
+  compact: false,
+} as const
 
 export class DebugTracer {
   constructor(
@@ -10,16 +20,16 @@ export class DebugTracer {
     private readonly logger: DebugLogSink,
   ) {}
 
-  event(name: string, details: Record<string, DebugValue> = {}) {
+  event(name: string, details?: DebugValue) {
     if (!this.enabled) return
-    const suffix = Object.keys(details).length ? ` ${JSON.stringify(details)}` : ''
+    const suffix = details === undefined ? '' : ` ${inspect(details, inspectOptions)}`
     this.logger.info(`[mai-plugin:debug] ${name}${suffix}`)
   }
 
   failure(name: string, error: unknown, details: Record<string, DebugValue> = {}) {
     this.event(name, {
       ...details,
-      errorType: error instanceof Error ? error.name : typeof error,
+      error,
     })
   }
 }

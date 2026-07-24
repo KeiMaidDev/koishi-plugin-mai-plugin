@@ -136,16 +136,16 @@ export class ProviderChain {
   ): Promise<ProviderResult<T>> {
     const failures: ProviderError[] = []
     for (const provider of await this.selectedProviders(user)) {
-      this.debug?.event('provider.chain.attempt', { provider: provider.id })
+      this.debug?.event('provider.chain.attempt', { provider: provider.id, user })
       try {
         const response = await operation(provider)
-        this.debug?.event('provider.chain.success', { provider: provider.id })
+        this.debug?.event('provider.chain.success', { provider: provider.id, user, response })
         return { response, provider }
       } catch (error) {
         const cancellation = findCancellationError(error)
         if (cancellation) throw cancellation
         const failure = this.normalizeFailure(provider, user, error)
-        this.debug?.failure('provider.chain.failure', failure, { provider: provider.id })
+        this.debug?.failure('provider.chain.failure', failure, { provider: provider.id, user })
         failures.push(failure)
       }
     }

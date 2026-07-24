@@ -251,23 +251,43 @@ function responseCookies(headers: Headers) {
   return combined ? [combined] : []
 }
 
-export function createKoishiWahlapRequester(http: Context['http']) {
+export function createKoishiWahlapRequester(
+  http: Context['http'],
+  debug?: DebugTracer,
+) {
   return async (url: string, options: WahlapRequestOptions): Promise<WahlapResponse> => {
-    const response = await http<string>(url, {
-      method: 'GET',
-      headers: options.headers,
-      redirect: options.redirect,
-      timeout: 60_000,
-      validateStatus: () => true,
-      responseType: boundedResponseText,
-    })
-    return {
-      status: response.status,
-      headers: {
-        location: response.headers.get('location') ?? undefined,
-        'set-cookie': responseCookies(response.headers),
-      },
-      body: response.data,
+    const startedAt = Date.now()
+    const request = { url, options }
+    debug?.event('wahlap.request.start', { request })
+    try {
+      const response = await http<string>(url, {
+        method: 'GET',
+        headers: options.headers,
+        redirect: options.redirect,
+        timeout: 60_000,
+        validateStatus: () => true,
+        responseType: boundedResponseText,
+      })
+      const result = {
+        status: response.status,
+        headers: {
+          location: response.headers.get('location') ?? undefined,
+          'set-cookie': responseCookies(response.headers),
+        },
+        body: response.data,
+      }
+      debug?.event('wahlap.request.success', {
+        durationMs: Date.now() - startedAt,
+        request,
+        response: result,
+      })
+      return result
+    } catch (error) {
+      debug?.failure('wahlap.request.failure', error, {
+        durationMs: Date.now() - startedAt,
+        request,
+      })
+      throw error
     }
   }
 }
@@ -396,7 +416,11 @@ export class UpdateService {
 
   async beginLxnsOAuth(session: UpdateSessionLocator) {
     this.assertActive()
-    this.options.debug?.event('oauth.lxns.begin')
+    this.options.debug?.event('oauth.lxns.begin', {
+      session,
+      oauth: this.options.oauth,
+      publicBaseUrl: this.options.publicBaseUrl,
+    })
     const missing = [
       !this.options.oauth.enabled && 'oauth.enabled',
       !this.options.oauth.authorizationUrl.trim() && 'oauth.authorizationUrl',
@@ -418,8 +442,15 @@ export class UpdateService {
       this.options.oauth.clientId,
       redirectUri,
     )
-    authorize.searchParams.set('state', this.lxnsStates.issue(session))
-    this.options.debug?.event('oauth.lxns.ready')
+    const state = this.lxnsStates.issue(session)
+    authorize.searchParams.set('state', state)
+    this.options.debug?.event('oauth.lxns.ready', {
+      session,
+      state,
+      redirectUri,
+      authorizationUrl: authorize.href,
+      oauth: this.options.oauth,
+    })
     return authorize.href
   }
 
@@ -431,7 +462,7 @@ export class UpdateService {
 
   async completeLxnsOAuth(state: string, code: string) {
     this.assertActive()
-    this.options.debug?.event('oauth.lxns.callback')
+    this.options.debug?.event('oauth.lxns.callback', { state, code })
     const session = this.lxnsStates.consume(state)
     const redirectUri = lxnsCallbackUrl(
       this.options.publicBaseUrl,
@@ -440,34 +471,54 @@ export class UpdateService {
     try {
       await this.options.lxns.exchangeOAuthCode(session.userId, code, redirectUri)
     } catch (error) {
-      this.options.debug?.failure('oauth.lxns.failure', error)
+      this.options.debug?.failure('oauth.lxns.failure', error, {
+        state,
+        code,
+        session,
+        redirectUri,
+      })
       await session.send(
         '落雪授权绑定失败，请重试。',
         { retryCommand: '/mai 绑定落雪' },
       )
       throw error
     }
-    this.options.debug?.event('oauth.lxns.success')
+    this.options.debug?.event('oauth.lxns.success', {
+      state,
+      code,
+      session,
+      redirectUri,
+    })
     await session.send('落雪授权绑定成功。')
     if (session.pendingCommand) await session.replay(session.pendingCommand)
   }
 
   async beginDivingFishUpdate(session: UpdateSessionLocator) {
     this.assertActive()
-    this.options.debug?.event('update.diving-fish.begin')
     const updateRoute = publicRoute(this.options.publicBaseUrl, '/mai-plugin/update')
+    this.options.debug?.event('update.diving-fish.begin', {
+      session,
+      publicBaseUrl: this.options.publicBaseUrl,
+      updateRoute,
+    })
     if (!await this.options.bind.getImportToken(session.userId)) {
       throw new UpdateBindingRequiredError()
     }
     const token = this.updateTokens.issue(session)
     const url = new URL(updateRoute)
     url.searchParams.set('token', token)
+    this.options.debug?.event('update.diving-fish.ready', {
+      session,
+      token,
+      url: url.href,
+    })
     return url.href
   }
 
   async createUpdateRedirect(token: string) {
     this.assertActive()
-    this.updateTokens.peek(token)
+    const session = this.updateTokens.peek(token)
+    this.options.debug?.event('update.diving-fish.redirect.begin', { token, session })
     const upstream = new URL(await this.options.fetchAuthorizationRedirect())
     if (upstream.origin !== WAHLAP_ORIGIN || upstream.pathname !== WAHLAP_AUTHORIZE_PATH) {
       throw new UpdateFlowError('授权服务器返回了无效的重定向地址。')
@@ -475,12 +526,18 @@ export class UpdateService {
     const callback = new URL(publicRoute(this.options.publicBaseUrl, WAHLAP_CALLBACK_PATH))
     callback.searchParams.set('token', token)
     upstream.searchParams.set('redirect_uri', callback.href)
+    this.options.debug?.event('update.diving-fish.redirect.ready', {
+      token,
+      session,
+      callbackUrl: callback.href,
+      authorizationUrl: upstream.href,
+    })
     return upstream.href
   }
 
   async completeDivingFishUpdate(token: string, callbackPath: string) {
     this.assertActive()
-    this.options.debug?.event('update.diving-fish.callback')
+    this.options.debug?.event('update.diving-fish.callback', { token, callbackPath })
     const session = this.updateTokens.consume(token)
     const callbackUrl = validateCallbackUrl(callbackPath)
     const importToken = await this.options.bind.getImportToken(session.userId)
@@ -498,10 +555,22 @@ export class UpdateService {
       )
       await session.send(`更新成功，已更新${result.updates + result.creates}条记录。`)
       this.options.debug?.event('update.diving-fish.success', {
-        records: result.updates + result.creates,
+        token,
+        callbackPath,
+        callbackUrl,
+        session,
+        importToken,
+        records,
+        result,
       })
     } catch (error) {
-      this.options.debug?.failure('update.diving-fish.failure', error)
+      this.options.debug?.failure('update.diving-fish.failure', error, {
+        token,
+        callbackPath,
+        callbackUrl,
+        session,
+        importToken,
+      })
       await session.send('更新失败，请稍后重试。')
       throw error
     }

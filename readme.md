@@ -60,7 +60,7 @@ koishi-plugin-mai-plugin
 
 ## 调试模式
 
-在插件配置中启用 `debugMode` 后，日志会以 `[mai-plugin:debug]` 为前缀输出数据源切换、查分器请求、成绩映射、素材缓存、OAuth 阶段和渲染耗时。调试日志只记录操作标签、数量、状态码、耗时和错误类型，不记录 Token、OAuth 链接、QQ、friend code 或响应正文。
+在插件配置中启用 `debugMode` 后，日志会以 `[mai-plugin:debug]` 为前缀输出完整配置、请求参数、请求头、响应头、响应正文、OAuth 参数、用户标识和完整错误对象。调试模式不会脱敏，Token、OAuth 链接、QQ、friend code 等敏感信息会直接写入日志，请仅在排查问题时临时启用。
 
 ```yaml
 debugMode: true

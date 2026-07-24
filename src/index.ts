@@ -165,7 +165,10 @@ export async function createDefaultCommandDependencies(
   }
   const logger = ctx.logger(PLUGIN_NAME)
   const debug = new DebugTracer(runtime.config.debugMode, logger)
-  debug.event('plugin.services.initialize')
+  debug.event('plugin.services.initialize', {
+    config: runtime.config,
+    publicBaseUrl: runtime.publicBaseUrl,
+  })
   const data = await services.dataSync.startup()
   const repositories = new MaiRepositories(ctx, runtime.config.oauth.tokenCipherKey)
   const providers = {
@@ -250,7 +253,7 @@ export async function createDefaultCommandDependencies(
     }
     throw error
   }
-  const wahlapRequest = createKoishiWahlapRequester(ctx.http)
+  const wahlapRequest = createKoishiWahlapRequester(ctx.http, debug)
   const wahlapFetcher = new WahlapRecordFetcher({ request: wahlapRequest })
   const updateService = new UpdateService({
     publicBaseUrl: runtime.publicBaseUrl,
@@ -499,11 +502,7 @@ export async function initializePlugin(
 ) {
   assertRequiredServices(ctx)
   const debug = createDebugTracer(ctx, config.debugMode)
-  debug.event('plugin.initialize', {
-    resourceSyncEnabled: config.resourceSync.enabled,
-    oauthEnabled: config.oauth.enabled,
-    compatibilityMode: config.compatibilityMode,
-  })
+  debug.event('plugin.initialize', { config })
   const activeLifecycle = lifecycle ?? createDefaultLifecycle(ctx as Context)
 
   const runtime: LifecycleContext = {

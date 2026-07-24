@@ -115,9 +115,13 @@ export class ProviderHttpClient {
     this.debug?.event('provider.request.start', {
       provider: this.provider,
       operation: request.label,
+      request,
+      connectTimeoutMs: this.connectTimeoutMs,
+      totalTimeoutMs: this.totalTimeoutMs,
     })
     const controller = new AbortController()
     let connected = false
+    let rawResponseBody: string | null | undefined
     const connectTimer = setTimeout(() => {
       if (!connected) controller.abort(new ProviderTimeoutError(this.provider, 'Provider connection timed out.'))
     }, this.connectTimeoutMs)
@@ -134,6 +138,7 @@ export class ProviderHttpClient {
           connected = true
           clearTimeout(connectTimer)
           const text = await raw.text()
+          rawResponseBody = text
           if (!text) return null
           try {
             return JSON.parse(text)
@@ -146,8 +151,10 @@ export class ProviderHttpClient {
       this.debug?.event('provider.request.success', {
         provider: this.provider,
         operation: request.label,
-        status: response.status,
         durationMs: Date.now() - startedAt,
+        request,
+        response,
+        rawResponseBody,
       })
       return response
     } catch (error) {
@@ -157,16 +164,29 @@ export class ProviderHttpClient {
           provider: this.provider,
           operation: request.label,
           durationMs: Date.now() - startedAt,
+          request,
+          rawResponseBody,
         })
         this.logger?.warn(`[mai-plugin] ${this.provider} ${request.label} request failed (timeout).`)
         throw timeout
       }
       const cancellation = findCancellationError(error)
-      if (cancellation) throw cancellation
+      if (cancellation) {
+        this.debug?.failure('provider.request.cancelled', cancellation, {
+          provider: this.provider,
+          operation: request.label,
+          durationMs: Date.now() - startedAt,
+          request,
+          rawResponseBody,
+        })
+        throw cancellation
+      }
       this.debug?.failure('provider.request.failure', error, {
         provider: this.provider,
         operation: request.label,
         durationMs: Date.now() - startedAt,
+        request,
+        rawResponseBody,
       })
       this.logger?.warn(`[mai-plugin] ${this.provider} ${request.label} request failed (transport).`)
       if (isProviderError(error)) throw error

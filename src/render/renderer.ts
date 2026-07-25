@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { Renderer, type RenderOptions } from '@takumi-rs/core'
+import { Renderer, type RenderOptions } from '@takumi-rs/wasm/node'
 import type { Node } from '@takumi-rs/helpers'
 import type { MaimaiAssetInvalidationSource } from '../data/sync-service'
 import { Semaphore, RENDER_QUEUE_FULL_MESSAGE } from '../utils/semaphore'
@@ -123,6 +123,10 @@ export class TakumiRenderService {
   private readonly timeoutMs: number
   private readonly debug?: DebugTracer
   private initializationPromise?: Promise<void>
+  private renderCalls = 0
+  private disposed = false
+  private disposalPromise?: Promise<void>
+  private readonly idleWaiters = new Set<() => void>()
 
   constructor(
     options: TakumiRenderServiceOptions = {},
@@ -170,7 +174,32 @@ export class TakumiRenderService {
     this.semaphore.clear(reason)
   }
 
+  dispose() {
+    if (this.disposalPromise) return this.disposalPromise
+    this.disposed = true
+    this.clearWaitingQueue(new Error('[mai-plugin] renderer disposed'))
+    this.disposalPromise = this.waitForIdle().then(() => {
+      this.assetCache.clear()
+      this.renderer.free()
+    })
+    return this.disposalPromise
+  }
+
+  private waitForIdle() {
+    if (!this.renderCalls) return Promise.resolve()
+    return new Promise<void>(resolve => this.idleWaiters.add(resolve))
+  }
+
+  private finishRenderCall() {
+    this.renderCalls--
+    if (this.renderCalls) return
+    for (const resolve of this.idleWaiters) resolve()
+    this.idleWaiters.clear()
+  }
+
   async render(node: Node, options: RenderOptions, signal?: AbortSignal): Promise<Buffer> {
+    if (this.disposed) throw new Error('[mai-plugin] renderer is disposed')
+    this.renderCalls++
     const requestedAt = Date.now()
     this.debug?.event('render.queue.enter', {
       active: this.semaphore.active,
@@ -196,7 +225,7 @@ export class TakumiRenderService {
           durationMs: Date.now() - requestedAt,
           bytes: output.byteLength,
         })
-        return output
+        return Buffer.from(output)
       } catch (error) {
         this.debug?.failure('render.failure', error, { durationMs: Date.now() - requestedAt })
         throw error
@@ -206,6 +235,7 @@ export class TakumiRenderService {
     } finally {
       release?.()
       abortScope.dispose()
+      this.finishRenderCall()
     }
   }
 

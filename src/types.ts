@@ -24,5 +24,6 @@ export interface LifecycleSteps {
 export interface PluginContext {
   database?: unknown
   server?: { selfUrl?: string }
+  canvas?: unknown
   on(event: 'dispose', listener: () => Awaitable<void>): unknown
 }

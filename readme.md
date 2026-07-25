@@ -18,8 +18,6 @@
 - 支持落雪 OAuth 绑定及水鱼成绩导入更新。
 - QQ 平台支持原生 Markdown 和按钮，其他平台可回退到普通文本与图片。
 
-> [!NOTE]
-> QQ 平台的 B15、B25、B35、B40、B50 成绩图可通过可选的 Koishi Assets 服务获得永久公网链接。Raw Markdown 会写入 PNG 的实际尺寸，五种 Rating 图片使用统一的三按钮 keyboard；Assets 不可用或转存失败时自动回退为普通 PNG 图片。
 
 ## 安装
 
@@ -29,27 +27,16 @@
 mai-plugin
 ```
 
-插件包名：
-
-```text
-koishi-plugin-mai-plugin
-```
-
-安装后启用插件，并确认 Koishi 已启用数据库和 Server 服务。
+安装后启用插件，如需在 QQ 官机使用，请确认 Koishi 已启用 assets 与 canvas 服务。
 
 ## 运行要求
 
 - Node.js 18 或更高版本。
 - Koishi 4.18.7 或兼容版本。
-- Koishi `database` 与 `server` 服务；数据库驱动需要支持插件注册的数据表和 `upsert`。
 - 可用的 Koishi HTTP 服务，用于访问水鱼、落雪和静态资源源。
 - QQ 原生 Markdown 和按钮使用 [adapter-qq-crack](https://github.com/koishi-shangxue-plugins/koishi-plugin-adapter-qq-crack) 独有语法；不支持时可启用兼容模式。
 
-需要使用落雪 OAuth 或水鱼成绩更新时，请先配置 Koishi Server 的 `selfUrl`，或设置插件的 `publicBaseUrl`。落雪 OAuth 还需要将[开发者面板生成的完整授权链接](https://maimai.lxns.net/docs/oauth-guide)填入 `oauth.authorizationUrl`。
-
-
-`resourceSync.allowedHosts` 应填写资源同步允许访问的额外主机名，不包含协议和路径。生产环境建议使用 HTTPS，并明确配置主机白名单。
-
+需要使用落雪 OAuth 时，请先配置 Koishi Server 的 `selfUrl`，或设置插件的 `publicBaseUrl`。
 
 ## 查分器绑定
 
@@ -68,13 +55,13 @@ koishi-plugin-mai-plugin
    /mai 绑定水鱼 <水鱼成绩导入 Token>
    ```
 
-3. 打开集中管理头像、牌子、查分器和绑定状态的 Raw Markdown 查分设置面板：
+3. 打开 查分设置面板：
 
    ```text
    /mai 查分设置
    ```
 
-   `/mai 设置mai` 和 `/mai 设置b50` 仍可作为该面板的别名使用。面板会提供头像、牌子、查分器和绑定/解绑按钮；查分器选择支持“自动”“水鱼”“落雪”，自动模式会依次尝试当前可用的查分器。
+面板会提供头像、牌子、查分器和绑定/解绑按钮；查分器选择支持“自动”“水鱼”“落雪”，自动模式会依次尝试当前可用的查分器。
 
 4. 查询成绩：
 
@@ -130,9 +117,7 @@ https://bot.example.com/mai-plugin/lxns/callback
 
 水鱼成绩更新需要部署者另行提供受控 HTTP 代理。本插件只生成客户端配置和处理回调，不实现通用 HTTP CONNECT 转发代理。不得暴露无认证的开放代理，并应限制目标域名、端口和访问来源。
 
-QQ 平台会在帮助、绑定、分页和可恢复错误中使用原生 Markdown 与按钮。非 QQ 平台、适配器不支持富媒体或启用 `compatibilityMode` 时，插件会继续使用普通文本和图片回复。
-
-OAuth Token、水鱼导入 Token、开发者 Token、QQ 号和 friend code 都属于敏感信息。请勿在日志、聊天记录、工单或截图中公开；`oauth.tokenCipherKey` 更换前应先迁移或清理已有 OAuth Token。
+OAuth Token、水鱼导入 Token、开发者 Token、QQ 号和 friend code 都属于敏感信息。请勿在聊天记录、工单或截图中公开；`oauth.tokenCipherKey` 更换前应先迁移或清理已有 OAuth Token。
 
 ## 项目结构
 
@@ -142,8 +127,6 @@ mai-plugin/
 │  ├─ fallback/          # 缺失远程资源时使用的默认图片
 │  ├─ fonts/             # Takumi 渲染使用的字体及授权说明
 │  └─ generated/         # 段位、状态和 Rating 等渲染素材
-├─ docs/
-│  └─ superpowers/       # 设计与实施记录
 ├─ src/
 │  ├─ commands/          # Koishi 命令、快捷触发词和交互引导
 │  ├─ data/              # 资源清单、曲目与别名缓存、标准化和同步服务
@@ -165,11 +148,9 @@ mai-plugin/
 └─ README.md             # 使用与开发文档
 ```
 
-运行期间的资源快照和试听文件默认写入 `data/maimai`，该路径可通过 `resourceSync.cacheDir` 修改。
+运行期间的资源快照和试听文件默认写入 Koishi 数据目录下的 `data/maimai`，该路径可通过 `resourceSync.cacheDir` 修改。
 
 ## 开发
-
-
 
 在 Koishi 根目录执行：
 

@@ -1,7 +1,9 @@
 import type { Context } from 'koishi'
 import h from '@satorijs/element'
 import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { Config, ConfigSchema } from './config'
+import type { CanvasService } from './platform/canvas'
 import {
   registerCoreCommands,
   type CoreCommandDependencies,
@@ -86,6 +88,7 @@ export * from './commands/settings'
 export * from './commands/update'
 export * from './commands/support'
 export * from './platform/admin'
+export * from './platform/canvas'
 export * from './platform/fallback-message'
 export * from './platform/qq-markdown-image'
 export * from './platform/qq-message'
@@ -214,9 +217,11 @@ export async function createDefaultCommandDependencies(
   const aliasService = new AliasService(data, repositories)
   const now = () => new Date()
   const queueService = new QueueService(repositories.arcade, { now })
-  const assets = (ctx as Context & {
+  const ctxServices = ctx as Context & {
     assets?: { transform?: (content: string) => Promise<string> }
-  }).assets
+    canvas: CanvasService
+  }
+  const assets = ctxServices.assets
   const transform = assets?.transform
   const guessService = new GuessService({
     musics: data.musics,
@@ -292,6 +297,7 @@ export async function createDefaultCommandDependencies(
     assetTransformer: typeof transform === 'function'
       ? { transform: content => transform.call(assets, content) }
       : undefined,
+    canvas: ctxServices.canvas,
     administrators: runtime.config.administrators,
     compatibilityMode: runtime.config.compatibilityMode,
     now,
@@ -327,6 +333,7 @@ export function createDefaultLifecycle(
 ): LifecycleSteps {
   const dependencies = { ...defaultLifecycleDependencies, ...overrides }
   const state = defaultRuntimeStates.get(ctx) ?? {}
+  const canvas = (ctx as Context & { canvas: CanvasService }).canvas
   defaultRuntimeStates.set(ctx, state)
 
   const ensureDebug = (runtime: LifecycleContext) => {
@@ -337,6 +344,7 @@ export function createDefaultLifecycle(
   const ensureDataSync = (runtime: LifecycleContext) => {
     state.dataSync ??= dependencies.createDataSync({
       config: runtime.config.resourceSync,
+      canvas,
       lxnsDeveloperToken: runtime.config.developerTokens.lxns,
       logger: ctx.logger(PLUGIN_NAME),
       debug: ensureDebug(runtime),
@@ -383,7 +391,7 @@ export function createDefaultLifecycle(
   return {
     async verifyNativePackages() {
       await Promise.all([
-        import('@takumi-rs/core'),
+        import('@takumi-rs/wasm/node'),
         import('@takumi-rs/helpers'),
       ])
     },
@@ -453,12 +461,20 @@ export function createDefaultLifecycle(
           state.routeRegistration?.dispose()
         } finally {
           state.routeRegistration = undefined
-          updateService?.dispose()
-          state.commandDependencies = undefined
-          state.servicesInitialized = false
-          state.disconnectInvalidation?.()
-          state.disconnectInvalidation = undefined
-          defaultRuntimeStates.delete(ctx)
+          try {
+            updateService?.dispose()
+            state.commandDependencies = undefined
+            state.servicesInitialized = false
+            state.disconnectInvalidation?.()
+            state.disconnectInvalidation = undefined
+          } finally {
+            try {
+              await state.renderer?.dispose()
+            } finally {
+              state.renderer = undefined
+              defaultRuntimeStates.delete(ctx)
+            }
+          }
         }
       }
     },
@@ -516,7 +532,7 @@ export async function initializePlugin(
     await activeLifecycle.verifyNativePackages(runtime)
   } catch {
     await cleanup()
-    throw new Error('[mai-plugin] Takumi native packages are unavailable. Reinstall @takumi-rs/core and @takumi-rs/helpers.')
+    throw new Error('[mai-plugin] Takumi WASM packages are unavailable. Reinstall @takumi-rs/wasm and @takumi-rs/helpers.')
   }
 
   try {
@@ -536,5 +552,11 @@ export async function initializePlugin(
 }
 
 export function apply(ctx: Context, config: Config) {
-  return initializePlugin(ctx, config)
+  return initializePlugin(ctx, {
+    ...config,
+    resourceSync: {
+      ...config.resourceSync,
+      cacheDir: resolve(ctx.baseDir, config.resourceSync.cacheDir),
+    },
+  })
 }

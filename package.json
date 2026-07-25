@@ -32,19 +32,19 @@
     "service": {
       "required": [
         "database",
-        "server"
+        "server",
+        "canvas"
       ]
     }
   },
   "dependencies": {
     "@guswpm/damerau-levenshtein": "1.2.1",
     "@satorijs/element": "^3.2.0",
-    "@takumi-rs/core": "2.1.1",
+    "@takumi-rs/wasm": "2.1.1",
     "@takumi-rs/helpers": "2.1.1",
     "cheerio": "1.0.0",
     "opencc-js": "1.4.1",
-    "schemastery": "^3.18.0",
-    "sharp": "^0.34.3"
+    "schemastery": "^3.18.0"
   },
   "peerDependencies": {
     "koishi": "^4.18.7"

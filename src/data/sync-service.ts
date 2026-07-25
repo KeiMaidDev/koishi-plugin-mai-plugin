@@ -1,8 +1,8 @@
 import { readFile, rm } from 'node:fs/promises'
 import { basename, join } from 'node:path'
-import sharp from 'sharp'
 import type { Config } from '../config'
 import type { GameVersion, MusicInfo } from '../domain/music'
+import { createSquarePngThumbnail, type CanvasService } from '../platform/canvas'
 import { resolvePackageAssetPath } from '../render/assets'
 import type { DebugTracer } from '../utils/debug'
 import { RemoteAliasCache, type RemoteAliases } from './alias-cache'
@@ -69,6 +69,7 @@ export interface MaimaiDataSyncOptions {
   builtinSource?: unknown | null
   debug?: DebugTracer
   now?: () => Date
+  canvas: CanvasService
 }
 
 export interface MaimaiAssetInvalidationEvent {
@@ -126,7 +127,7 @@ export class MaimaiDataStore {
       const normalized = relativePath.replaceAll('\\', '/')
       const id = resourceIdFromPath(normalized)
       if (id === undefined) continue
-      if (/\/covers\/\d+_s\.jpg$/i.test(normalized)) this.coverThumbnails.set(id, absolutePath)
+      if (/\/covers\/\d+_s\.(?:png|jpe?g)$/i.test(normalized)) this.coverThumbnails.set(id, absolutePath)
       else if (/\/covers\/\d+\.(?:png|jpe?g|webp)$/i.test(normalized)) this.covers.set(id, absolutePath)
       else if (/\/(?:avatars|icons)\/\d+\.(?:png|jpe?g|webp)$/i.test(normalized)) this.avatars.set(id, absolutePath)
       else if (/\/plates\/\d+\.(?:png|jpe?g|webp)$/i.test(normalized)) this.plateImages.set(id, absolutePath)
@@ -299,12 +300,13 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
       const normalized = relativePath.replaceAll('\\', '/')
       const match = normalized.match(/^covers\/(\d+)\.(?:png|jpe?g|webp)$/i)
       if (!match) continue
-      const thumbnailPath = `covers/${match[1]}_s.jpg`
+      const thumbnailPath = `covers/${match[1]}_s.png`
       const target = join(stagingDirectory, thumbnailPath)
-      const contents = await sharp(join(stagingDirectory, relativePath))
-        .resize(72, 72, { fit: 'cover' })
-        .jpeg({ quality: 85, chromaSubsampling: '4:4:4' })
-        .toBuffer()
+      const contents = await createSquarePngThumbnail(
+        this.options.canvas,
+        join(stagingDirectory, relativePath),
+        72,
+      )
       const metadata = await this.cache.writeAtomic(target, contents)
       files[thumbnailPath] = { ...metadata, source: `generated:${source}` }
     }

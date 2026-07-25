@@ -98,7 +98,7 @@ export const usage = `
 
 面向 Koishi 的舞萌 DX 功能插件，移植自[可怜BOT](https://github.com/xszqxszq/KarenBot) 的舞萌插件
 
-插件需要以下配置：[水鱼查分器](https://maimai.diving-fish.com/)开发者令牌，[落雪咖啡屋](https://maimai.lxns.net/)开发者令牌以及 OAuth 授权链接、客户端 ID、密钥、令牌加密密钥。
+插件需要以下配置：[水鱼查分器](https://maimai.diving-fish.com/)开发者令牌，[落雪咖啡屋](https://maimai.lxns.net/)开发者令牌以及 OAuth 授权链接、客户端 ID、密钥。
 
 请确保您的koishi处于公网可访问状态，确保落雪OAuth回调地址可访问。
 

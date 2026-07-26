@@ -29,7 +29,6 @@ import { ProviderOAuthRequiredError } from '../providers/errors'
 import { mapQueryError } from '../platform/fallback-message'
 import type { Awaitable } from '../types'
 import type { Semaphore } from '../utils/semaphore'
-import type { CanvasService } from '../platform/canvas'
 
 export const SEARCH_PAGE_SIZE = 10
 export const SEARCH_TOO_MANY = 40
@@ -41,7 +40,7 @@ export interface CoreCommandData {
   courses: ReadonlyMap<number, CourseInfo>
   icons: ReadonlyMap<number, IconInfo>
   plates: ReadonlyMap<number, PlateInfo>
-  coverPath(resourceId: number, thumbnail?: boolean): string | Promise<string>
+  coverPath(resourceId: number): string | Promise<string>
 }
 
 export interface CoreCommandDependencies {
@@ -94,7 +93,6 @@ export interface CoreCommandDependencies {
   >
   renderer: MaiRenderer
   assetTransformer?: AssetTransformer
-  canvas: Pick<CanvasService, 'loadImage'>
   administrators?: readonly string[]
   compatibilityMode?: boolean
   now?: () => Date
@@ -371,7 +369,7 @@ export async function replyImage(
 
 export async function replyMarkdownImage(
   session: ActiveCommandSession,
-  dependencies: ReplyCommandDependencies & Pick<CoreCommandDependencies, 'assetTransformer' | 'canvas'>,
+  dependencies: ReplyCommandDependencies & Pick<CoreCommandDependencies, 'assetTransformer'>,
   image: Buffer | Uint8Array,
   options: ReplyMarkdownImageOptions,
 ) {
@@ -388,7 +386,6 @@ export async function replyMarkdownImage(
       alt: options.alt,
       keyboard: options.keyboard,
       assets: dependencies.assetTransformer,
-      canvas: dependencies.canvas,
     })
   } catch {
     await sendReply(session, fallback, undefined, { compatibilityMode })

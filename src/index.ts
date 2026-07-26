@@ -3,7 +3,6 @@ import h from '@satorijs/element'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { Config, ConfigSchema } from './config'
-import type { CanvasService } from './platform/canvas'
 import {
   registerCoreCommands,
   type CoreCommandDependencies,
@@ -88,7 +87,6 @@ export * from './commands/settings'
 export * from './commands/update'
 export * from './commands/support'
 export * from './platform/admin'
-export * from './platform/canvas'
 export * from './platform/fallback-message'
 export * from './platform/qq-markdown-image'
 export * from './platform/qq-message'
@@ -219,7 +217,6 @@ export async function createDefaultCommandDependencies(
   const queueService = new QueueService(repositories.arcade, { now })
   const ctxServices = ctx as Context & {
     assets?: { transform?: (content: string) => Promise<string> }
-    canvas: CanvasService
   }
   const assets = ctxServices.assets
   const transform = assets?.transform
@@ -297,7 +294,6 @@ export async function createDefaultCommandDependencies(
     assetTransformer: typeof transform === 'function'
       ? { transform: content => transform.call(assets, content) }
       : undefined,
-    canvas: ctxServices.canvas,
     administrators: runtime.config.administrators,
     compatibilityMode: runtime.config.compatibilityMode,
     now,
@@ -333,7 +329,6 @@ export function createDefaultLifecycle(
 ): LifecycleSteps {
   const dependencies = { ...defaultLifecycleDependencies, ...overrides }
   const state = defaultRuntimeStates.get(ctx) ?? {}
-  const canvas = (ctx as Context & { canvas: CanvasService }).canvas
   defaultRuntimeStates.set(ctx, state)
 
   const ensureDebug = (runtime: LifecycleContext) => {
@@ -344,7 +339,6 @@ export function createDefaultLifecycle(
   const ensureDataSync = (runtime: LifecycleContext) => {
     state.dataSync ??= dependencies.createDataSync({
       config: runtime.config.resourceSync,
-      canvas,
       lxnsDeveloperToken: runtime.config.developerTokens.lxns,
       logger: ctx.logger(PLUGIN_NAME),
       debug: ensureDebug(runtime),

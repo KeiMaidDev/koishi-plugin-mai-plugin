@@ -103,7 +103,7 @@ async function levelTile(
   data: MaimaiDataStore,
 ) {
   const cover = await renderService.loadAsset(
-    data.coverPath(chart.music.resourceId, true),
+    data.coverPath(chart.music.resourceId),
     resolvePackageAssetPath('fallback/cover.png'),
   )
   const color = difficultyColor(chart)

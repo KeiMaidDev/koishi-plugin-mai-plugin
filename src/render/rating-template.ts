@@ -190,7 +190,7 @@ async function ratingRecordSlot(
 ) {
   const color = difficultyColor(record)
   const cover = await renderService.loadAsset(
-    data.coverPath(record.music.resourceId, true),
+    data.coverPath(record.music.resourceId),
     resolvePackageAssetPath('fallback/cover.png'),
   )
   const stars = DeluxeScore.stars(record.deluxeScore, record.chart.maxDeluxeScore)

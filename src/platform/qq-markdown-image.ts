@@ -1,5 +1,5 @@
 import h from '@satorijs/element'
-import { readCanvasImageDimensions, type CanvasService } from './canvas'
+import { imageSize } from 'image-size'
 import { createQqNativeMarkdown, type QqKeyboard } from './qq-message'
 
 export interface AssetTransformer {
@@ -11,7 +11,6 @@ export interface QqMarkdownImageOptions {
   alt: string
   keyboard: QqKeyboard
   assets: AssetTransformer
-  canvas: Pick<CanvasService, 'loadImage'>
 }
 
 function assertDimensions(width: number, height: number) {
@@ -74,7 +73,8 @@ export async function transformAssetImageUrl(
 
 export async function createQqMarkdownImage(options: QqMarkdownImageOptions) {
   const image = Buffer.from(options.image)
-  const { width, height } = await readCanvasImageDimensions(options.canvas, image)
+  const { width, height } = imageSize(image)
+  assertDimensions(width, height)
   const transformed = await options.assets.transform(h.image(image, 'image/png').toString())
   const content = createQqMarkdownImageContent(
     transformedImageUrl(transformed),

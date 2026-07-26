@@ -246,10 +246,9 @@ function formatChartMarkdown(chart: ChartInfo, coverUrl: string | null) {
 async function loadCover(
   dependencies: CoreCommandDependencies,
   music: MusicInfo,
-  thumbnail = false,
 ) {
   try {
-    const path = await dependencies.data.coverPath(music.resourceId, thumbnail)
+    const path = await dependencies.data.coverPath(music.resourceId)
     const extension = extname(path).toLocaleLowerCase()
     return {
       data: await readFile(path),
@@ -269,7 +268,6 @@ const publicCoverCaches = new WeakMap<object, Map<string, Promise<string | null>
 function mappedCoverUrl(
   dependencies: CoreCommandDependencies,
   music: MusicInfo,
-  thumbnail = false,
 ) {
   if (!dependencies.assetTransformer) return Promise.resolve(null)
   let cache = publicCoverCaches.get(dependencies)
@@ -277,11 +275,11 @@ function mappedCoverUrl(
     cache = new Map()
     publicCoverCaches.set(dependencies, cache)
   }
-  const key = `${music.resourceId}:${thumbnail ? 'thumbnail' : 'full'}`
+  const key = String(music.resourceId)
   const existing = cache.get(key)
   if (existing) return existing
   const pending = (async () => {
-    const cover = await loadCover(dependencies, music, thumbnail)
+    const cover = await loadCover(dependencies, music)
     if (!cover) return null
     try {
       return await transformAssetImageUrl(
@@ -369,7 +367,7 @@ async function createSearchPage(
   const start = (view.currentPage - 1) * SEARCH_PAGE_SIZE
   const pageResults = results.slice(start, start + SEARCH_PAGE_SIZE)
   const coverUrls = await Promise.all(pageResults.map(result => (
-    mappedCoverUrl(dependencies, isChart(result) ? result.music : result, true)
+    mappedCoverUrl(dependencies, isChart(result) ? result.music : result)
   )))
   const markdown = [
     `**${view.text.slice(0, view.text.indexOf('\n'))}**`,

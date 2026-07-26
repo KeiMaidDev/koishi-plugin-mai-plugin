@@ -2,7 +2,6 @@ import { readFile, rm } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type { Config } from '../config'
 import type { GameVersion, MusicInfo } from '../domain/music'
-import { createSquarePngThumbnail, type CanvasService } from '../platform/canvas'
 import { resolvePackageAssetPath } from '../render/assets'
 import type { DebugTracer } from '../utils/debug'
 import { RemoteAliasCache, type RemoteAliases } from './alias-cache'
@@ -69,7 +68,6 @@ export interface MaimaiDataSyncOptions {
   builtinSource?: unknown | null
   debug?: DebugTracer
   now?: () => Date
-  canvas: CanvasService
 }
 
 export interface MaimaiAssetInvalidationEvent {
@@ -94,7 +92,7 @@ export class MissingMaimaiDataError extends Error {
 }
 
 function resourceIdFromPath(path: string) {
-  const match = basename(path).match(/^(\d+)(?:_s)?\.[^.]+$/i)
+  const match = basename(path).match(/^(\d+)\.[^.]+$/i)
   return match ? Number(match[1]) : undefined
 }
 
@@ -105,7 +103,6 @@ export class MaimaiDataStore {
   readonly icons: Map<number, IconInfo>
   readonly courses: Map<number, CourseInfo>
   private readonly covers = new Map<number, string>()
-  private readonly coverThumbnails = new Map<number, string>()
   private readonly avatars = new Map<number, string>()
   private readonly plateImages = new Map<number, string>()
   private _remoteAliases: RemoteAliases = new Map()
@@ -127,16 +124,14 @@ export class MaimaiDataStore {
       const normalized = relativePath.replaceAll('\\', '/')
       const id = resourceIdFromPath(normalized)
       if (id === undefined) continue
-      if (/\/covers\/\d+_s\.(?:png|jpe?g)$/i.test(normalized)) this.coverThumbnails.set(id, absolutePath)
-      else if (/\/covers\/\d+\.(?:png|jpe?g|webp)$/i.test(normalized)) this.covers.set(id, absolutePath)
+      if (/\/covers\/\d+\.(?:png|jpe?g|webp)$/i.test(normalized)) this.covers.set(id, absolutePath)
       else if (/\/(?:avatars|icons)\/\d+\.(?:png|jpe?g|webp)$/i.test(normalized)) this.avatars.set(id, absolutePath)
       else if (/\/plates\/\d+\.(?:png|jpe?g|webp)$/i.test(normalized)) this.plateImages.set(id, absolutePath)
     }
   }
 
-  coverPath(resourceId: number, thumbnail = false) {
-    const local = (thumbnail ? this.coverThumbnails.get(resourceId) : this.covers.get(resourceId))
-      ?? this.covers.get(resourceId)
+  coverPath(resourceId: number) {
+    const local = this.covers.get(resourceId)
     if (local) return local
     const remote = this.remoteAssets?.resolve('jacket', resourceId, FALLBACK_COVER)
     return remote ? remote.then(path => path ?? FALLBACK_COVER) : FALLBACK_COVER
@@ -289,27 +284,6 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
       for (const listener of this.assetInvalidationListeners) listener(event)
     }
     return store
-  }
-
-  private async generateCoverThumbnails(
-    stagingDirectory: string,
-    files: Record<string, ResourceManifestFile>,
-    source: string,
-  ) {
-    for (const relativePath of Object.keys({ ...files })) {
-      const normalized = relativePath.replaceAll('\\', '/')
-      const match = normalized.match(/^covers\/(\d+)\.(?:png|jpe?g|webp)$/i)
-      if (!match) continue
-      const thumbnailPath = `covers/${match[1]}_s.png`
-      const target = join(stagingDirectory, thumbnailPath)
-      const contents = await createSquarePngThumbnail(
-        this.options.canvas,
-        join(stagingDirectory, relativePath),
-        72,
-      )
-      const metadata = await this.cache.writeAtomic(target, contents)
-      files[thumbnailPath] = { ...metadata, source: `generated:${source}` }
-    }
   }
 
   private async storeFromCache(snapshot?: CachedSnapshot) {
@@ -481,7 +455,6 @@ export class MaimaiDataSyncService implements MaimaiAssetInvalidationSource {
       normalizeMaimaiSource(JSON.parse(await readFile(join(staging, 'source.json'), 'utf8')), {
         revision: remoteManifest.revision,
       })
-      await this.generateCoverThumbnails(staging, files, baseUrl.href)
       await this.cache.commitSnapshot(staging, remoteManifest.revision, files)
       return this.storeFromCache()
     } catch (error) {

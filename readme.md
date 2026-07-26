@@ -27,7 +27,7 @@
 mai-plugin
 ```
 
-安装后启用插件，如需在 QQ 官机使用，请确认 Koishi 已启用 assets 与 canvas 服务。
+安装后启用插件，如需在 QQ 官机使用，请确认 Koishi 已启用 assets 服务。
 
 ## 运行要求
 

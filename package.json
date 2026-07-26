@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-mai-plugin",
   "description": "Koishi maimai DX query, rendering, OAuth binding, and guessing plugin.",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [

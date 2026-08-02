@@ -65,7 +65,7 @@ export function ratingSelfQueryCommand(filterText: string, total: number) {
     throw new RangeError('Unsupported Rating count.')
   }
   const filter = filterText.trim()
-  return `/mai ${filter ? `${filter} ` : ''}b${total}`
+  return `/mai rating ${filter ? `${filter} ` : ''}b${total}`
 }
 
 export function createRatingKeyboard(filterText: string, total: number) {
@@ -148,14 +148,14 @@ function ratingRenderInput(
     newCount,
     rating,
     title: `[${backend}] B${oldCount} ${oldRating} + B${newCount} ${newRating}${coursePart} = ${rating}`,
-    oldLabel: `BEST ${oldCount}`,
-    newLabel: `NEW ${newCount}`,
+    oldLabel: `OLD CHARTS · B${oldCount}`,
+    newLabel: `NEW CHARTS · B${newCount}`,
   }
 }
 
 function scoreListPageCommand(filter: string, page: number) {
   const normalized = filter.trim()
-  return `/mai ${normalized ? `${normalized} ` : ''}成绩列表 ${page}`
+  return `/mai 成绩列表${normalized ? ` ${normalized}` : ''} ${page}`
 }
 
 async function createScoreListPage(
@@ -293,7 +293,11 @@ export function registerImageCommands(
   const commands = []
 
   commands.push(ctx.command('mai.rating <input:text>', '生成 B15/B25/B35/B40/B50 成绩图')
-    .shortcut(/^\/mai\s+((?:.+?)?b(?:15|25|35|40|50)(?:\s+.*)?)$/i, { args: ['$1'] })
+    .alias('mai.b15', { args: ['b15'] })
+    .alias('mai.b25', { args: ['b25'] })
+    .alias('mai.b35', { args: ['b35'] })
+    .alias('mai.b40', { args: ['b40'] })
+    .alias('mai.b50', { args: ['b50'] })
     .action(commandAction(async ({ session }, input) => {
       const match = input.match(/^(.*?)(?:b)(15|25|35|40|50)(?:\s+(.*))?$/i)
       if (!match) return
@@ -349,7 +353,7 @@ export function registerImageCommands(
     })))
 
   commands.push(ctx.command('mai.song-rating <query:text>', '将同一首歌填充为歌50成绩图')
-    .shortcut(/^\/mai\s+歌50\s+(.+)$/i, { args: ['$1'] })
+    .alias('mai.歌50')
     .action(commandAction(async ({ session }, raw) => {
       const parsed = parseSongRatingQuery(raw)
       const music = parsed?.query ? await songByAlias(dependencies, parsed.query) : undefined
@@ -404,9 +408,7 @@ export function registerImageCommands(
     })))
 
   commands.push(ctx.command('mai.score-list [filter:string] [page:posint]', '生成成绩列表')
-    .shortcut(/^\/mai\s+(.*?)(?:分数列表|分数表|成绩列表|成绩表)(?:\s+(\d+))?$/, {
-      args: ['$1', '$2'],
-    })
+    .alias('mai.分数列表', 'mai.分数表', 'mai.成绩列表', 'mai.成绩表')
     .action(commandAction(async ({ session }, filterText = '', pageText = '') => {
       const page = pageText ? Number(pageText) : 1
       if (!Number.isSafeInteger(page) || page < 1) {
@@ -452,7 +454,7 @@ export function registerImageCommands(
     })))
 
   commands.push(ctx.command('mai.level-table [filter:text]', '生成定数表')
-    .shortcut(/^\/mai\s+(.*?)定数表$/, { args: ['$1'] })
+    .alias('mai.定数表')
     .action(commandAction(async ({ session }, filterText = '') => {
       const selected = filtersAndCharts(dependencies, filterText)
       if (!selected) {
@@ -467,7 +469,7 @@ export function registerImageCommands(
     })))
 
   commands.push(ctx.command('mai.complete-table [filter:text]', '生成完成表或进度表')
-    .shortcut(/^\/mai\s+(?!.*未完成)(.*?)(?:完成表|进度表)$/, { args: ['$1'] })
+    .alias('mai.完成表', 'mai.进度表')
     .action(commandAction(async ({ session }, filterText = '') => {
       const selected = filtersAndCharts(dependencies, filterText)
       if (!selected?.charts.length) {
@@ -496,7 +498,7 @@ export function registerImageCommands(
     })))
 
   commands.push(ctx.command('mai.incomplete-table [filter:text]', '生成未完成表')
-    .shortcut(/^\/mai\s+(.*?)(?:未完成表|未完成列表)$/, { args: ['$1'] })
+    .alias('mai.未完成表', 'mai.未完成列表')
     .action(commandAction(async ({ session }, filterText = '') => {
       const selected = filtersAndCharts(dependencies, filterText)
       if (!selected?.charts.length) {
@@ -531,11 +533,12 @@ export function registerImageCommands(
 
   commands.push(ctx.command('mai.song-score <query:text>', '生成单曲成绩图')
     .option('difficulty', '-d <difficulty:string> 只显示指定难度')
-    .shortcut(/^\/mai\s+(?:info|minfo)\s+(.+)$/i, { args: ['$1'] })
-    .shortcut(/^\/mai\s+(绿谱?|黄谱?|红谱?|紫谱?|白谱?)成绩\s+(.+)$/, {
-      args: ['$2'],
-      options: { difficulty: '$1' },
-    })
+    .alias('mai.info', 'mai.minfo')
+    .alias('mai.绿谱成绩', { options: { difficulty: '绿谱' } })
+    .alias('mai.黄谱成绩', { options: { difficulty: '黄谱' } })
+    .alias('mai.红谱成绩', { options: { difficulty: '红谱' } })
+    .alias('mai.紫谱成绩', { options: { difficulty: '紫谱' } })
+    .alias('mai.白谱成绩', { options: { difficulty: '白谱' } })
     .action(commandAction(async ({ session, options }, query) => {
       const music = await songByAlias(dependencies, query)
       if (!music) {
@@ -561,7 +564,7 @@ export function registerImageCommands(
     })))
 
   commands.push(ctx.command('mai.course <name:text>', '生成段位表')
-    .shortcut(/^\/mai\s+段位表(?:\s+(.+))?$/, { args: ['$1'] })
+    .alias('mai.段位表')
     .action(commandAction(async ({ session }, name = '') => {
       const normalized = name.trim().toLocaleLowerCase()
       const course = [...dependencies.data.courses.values()].find(entry => (

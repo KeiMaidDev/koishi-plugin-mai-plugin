@@ -42,12 +42,6 @@ export interface RatingRenderPlan {
   height: number
 }
 
-interface RatingGeneratedAssets {
-  numberPlate: Buffer
-  danBadge: Buffer
-  statusPlate: Buffer
-}
-
 const rateLabels = Object.freeze({
   sssp: 'SSS+',
   sss: 'SSS',
@@ -93,49 +87,6 @@ function difficultyColor(record: RecordEntry) {
     ?? MAIMAI_RENDER_THEME.colors.mutedText
 }
 
-function statusBadge(text: string, color: string, statusPlate: Buffer) {
-  return createContainerNode({
-    className: 'rating-status-badge',
-    style: {
-      position: 'relative',
-      height: 20,
-      minWidth: 24,
-      paddingLeft: 3,
-      paddingRight: 3,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: 4,
-      borderLeft: `3px solid ${color}`,
-      backgroundColor: '#26313e',
-      color: '#ffffff',
-      flexShrink: 0,
-      overflow: 'hidden',
-    },
-    children: [
-      createImageNode({
-        className: 'generated-status-plate',
-        src: statusPlate,
-        width: 120,
-        height: 36,
-        style: {
-          position: 'absolute',
-          left: 0,
-          top: 0,
-          width: '100%',
-          height: '100%',
-          objectFit: 'fill',
-          opacity: 0.9,
-        },
-      }),
-      createTextNode({
-        text,
-        style: { position: 'relative', fontSize: 9, fontWeight: 700, lineHeight: 1 },
-      }),
-    ],
-  })
-}
-
 function ratingSlotBase(index: number, section: 'old' | 'new', empty: boolean) {
   return {
     id: `rating-slot-${section}-${index + 1}`,
@@ -151,11 +102,11 @@ function ratingSlotBase(index: number, section: 'old' | 'new', empty: boolean) {
       height: 104,
       overflow: 'hidden' as const,
       display: 'flex' as const,
-      flexDirection: 'row' as const,
+      flexDirection: 'column' as const,
       flexShrink: 0,
-      borderRadius: 6,
-      backgroundColor: empty ? '#edf0f4' : '#ffffff',
-      border: empty ? '1px dashed #c8ced8' : '1px solid #d6dbe3',
+      borderRadius: 5,
+      backgroundColor: empty ? '#eaf0f4' : MAIMAI_RENDER_THEME.colors.surface,
+      border: empty ? `1px dashed ${MAIMAI_RENDER_THEME.colors.line}` : `1px solid ${MAIMAI_RENDER_THEME.colors.line}`,
     },
   }
 }
@@ -184,7 +135,6 @@ async function ratingRecordSlot(
   index: number,
   section: 'old' | 'new',
   record: RecordEntry,
-  generatedAssets: RatingGeneratedAssets,
   renderService: TakumiRenderService,
   data: MaimaiDataStore,
 ) {
@@ -201,64 +151,89 @@ async function ratingRecordSlot(
 
   return createContainerNode({
     ...ratingSlotBase(index, section, false),
+    style: {
+      ...ratingSlotBase(index, section, false).style,
+      border: `2px solid ${color}`,
+    },
     attributes: {
       ...ratingSlotBase(index, section, false).attributes,
       'data-difficulty': record.chart.difficulty.name,
     },
     children: [
-      createContainerNode({
-        style: { width: 6, height: '100%', backgroundColor: color, flexShrink: 0 },
+      createImageNode({
+        src: cover,
+        width: 264,
+        height: 46,
+        style: { width: 264, height: 46, objectFit: 'cover', flexShrink: 0 },
       }),
       createContainerNode({
         style: {
-          width: 82,
-          height: '100%',
-          padding: 8,
+          position: 'absolute',
+          left: 4,
+          top: 4,
+          height: 17,
+          paddingLeft: 5,
+          paddingRight: 5,
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
+          borderRadius: 2,
+          backgroundColor: 'rgba(38,49,60,0.88)',
+          color: '#ffffff',
         },
-        children: [createImageNode({
-          src: cover,
-          width: 72,
-          height: 72,
-          style: { width: 72, height: 72, objectFit: 'cover', borderRadius: 4 },
+        children: [createTextNode({
+          text: `#${String(index + 1).padStart(2, '0')} · ${record.music.id}`,
+          style: { fontSize: 9, fontWeight: 700, lineHeight: 1 },
         })],
       }),
       createContainerNode({
         style: {
-          width: 180,
-          height: '100%',
-          paddingTop: 7,
-          paddingRight: 7,
-          paddingBottom: 6,
+          position: 'absolute',
+          right: 4,
+          top: 4,
+          height: 17,
+          paddingLeft: 5,
+          paddingRight: 5,
+          display: 'flex',
+          alignItems: 'center',
+          borderRadius: 2,
+          backgroundColor: MAIMAI_RENDER_THEME.colors.highlight,
+          color: MAIMAI_RENDER_THEME.colors.text,
+        },
+        children: [createTextNode({
+          text: type,
+          style: { fontSize: 9, fontWeight: 700, lineHeight: 1 },
+        })],
+      }),
+      createContainerNode({
+        style: {
+          width: '100%',
+          height: 54,
+          paddingTop: 3,
+          paddingLeft: 6,
+          paddingRight: 6,
+          paddingBottom: 4,
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
         },
         children: [
           createTextNode({
-            text: `#${index + 1} · ID ${record.music.id}`,
-            style: { fontSize: 10, color: '#737d8c', lineHeight: 1.15 },
-          }),
-          createTextNode({
             text: record.music.name,
             style: {
               width: '100%',
-              height: 20,
+              height: 16,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
-              fontSize: 14,
+              fontSize: 11,
               fontWeight: 700,
-              lineHeight: 1.35,
+              lineHeight: 1.25,
               color: MAIMAI_RENDER_THEME.colors.text,
             },
           }),
           createContainerNode({
             style: {
-              height: 24,
+              height: 18,
               display: 'flex',
               alignItems: 'baseline',
               justifyContent: 'space-between',
@@ -266,23 +241,33 @@ async function ratingRecordSlot(
             children: [
               createTextNode({
                 text: Rate.toString(record.achievement),
-                style: { fontSize: 16, fontWeight: 700, color: '#1c2634', lineHeight: 1 },
+                style: { fontSize: 14, fontWeight: 700, color, lineHeight: 1 },
               }),
               createTextNode({
                 text: `${record.chart.levelValue.toFixed(1)} -> ${record.rating}`,
-                style: { fontSize: 10, fontWeight: 700, color, lineHeight: 1 },
+                style: { fontSize: 9, fontWeight: 700, color: MAIMAI_RENDER_THEME.colors.mutedText, lineHeight: 1 },
               }),
             ],
           }),
           createContainerNode({
             className: 'rating-status-row',
-            style: { height: 20, display: 'flex', flexDirection: 'row', gap: 2, overflow: 'hidden' },
+            style: {
+              height: 14,
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              overflow: 'hidden',
+            },
             children: [
-              statusBadge(type, type === 'DX' ? '#137e91' : '#536170', generatedAssets.statusPlate),
-              statusBadge(rank, '#303945', generatedAssets.statusPlate),
-              statusBadge(combo, combo === '--' ? '#98a0aa' : '#c3486c', generatedAssets.statusPlate),
-              statusBadge(sync, sync === '--' ? '#98a0aa' : '#4f6fc7', generatedAssets.statusPlate),
-              statusBadge(`DX ★${stars}`, '#a36517', generatedAssets.statusPlate),
+              createTextNode({
+                text: rank,
+                style: { fontSize: 9, fontWeight: 700, color: MAIMAI_RENDER_THEME.colors.text, lineHeight: 1 },
+              }),
+              createTextNode({
+                text: `${combo} · ${sync} · DX ★${stars}`,
+                style: { fontSize: 8, fontWeight: 700, color: MAIMAI_RENDER_THEME.colors.mutedText, lineHeight: 1 },
+              }),
             ],
           }),
         ],
@@ -296,7 +281,6 @@ async function ratingSection(
   section: 'old' | 'new',
   count: number,
   records: readonly RecordEntry[],
-  generatedAssets: RatingGeneratedAssets,
   renderService: TakumiRenderService,
   data: MaimaiDataStore,
 ) {
@@ -304,7 +288,7 @@ async function ratingSection(
   const slots = await Promise.all(Array.from({ length: count }, (_, index) => {
     const record = visibleRecords[index]
     return record
-      ? ratingRecordSlot(index, section, record, generatedAssets, renderService, data)
+      ? ratingRecordSlot(index, section, record, renderService, data)
       : emptyRatingSlot(index, section)
   }))
 
@@ -315,19 +299,24 @@ async function ratingSection(
       createContainerNode({
         style: {
           height: 34,
+          paddingLeft: 10,
+          paddingRight: 10,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          borderBottom: `3px solid ${section === 'old' ? '#317a91' : '#bd4f78'}`,
+          borderLeft: `7px solid ${section === 'old'
+            ? MAIMAI_RENDER_THEME.colors.accent
+            : MAIMAI_RENDER_THEME.colors.secondaryAccent}`,
+          backgroundColor: MAIMAI_RENDER_THEME.colors.surface,
         },
         children: [
           createTextNode({
             text: title,
-            style: { fontSize: 20, fontWeight: 700, color: '#26313e' },
+            style: { fontSize: 17, fontWeight: 700, color: MAIMAI_RENDER_THEME.colors.text },
           }),
           createTextNode({
             text: `${visibleRecords.length}/${count}`,
-            style: { fontSize: 13, fontWeight: 700, color: '#677283' },
+            style: { fontSize: 12, fontWeight: 700, color: MAIMAI_RENDER_THEME.colors.mutedText },
           }),
         ],
       }),
@@ -351,7 +340,6 @@ async function ratingHeader(
   input: RatingRenderInput,
   title: string,
   rating: number,
-  generatedAssets: RatingGeneratedAssets,
   renderService: TakumiRenderService,
   data: MaimaiDataStore,
 ) {
@@ -365,85 +353,94 @@ async function ratingHeader(
   return createContainerNode({
     id: 'rating-header',
     style: {
-      position: 'relative',
       width: '100%',
       height: 176,
+      padding: 16,
       overflow: 'hidden',
       display: 'flex',
+      flexDirection: 'row',
       alignItems: 'center',
+      gap: 18,
       borderRadius: 6,
-      backgroundColor: '#26313e',
+      border: `1px solid ${MAIMAI_RENDER_THEME.colors.line}`,
+      backgroundColor: MAIMAI_RENDER_THEME.colors.surface,
     },
     children: [
       createImageNode({
-        src: plate,
-        width: 1384,
-        height: 176,
+        src: avatar,
+        width: 128,
+        height: 128,
         style: {
-          position: 'absolute',
-          left: 0,
-          top: 0,
-          width: 1384,
-          height: 176,
+          width: 128,
+          height: 128,
           objectFit: 'cover',
-          opacity: 0.72,
-        },
-      }),
-      createContainerNode({
-        style: {
-          position: 'absolute',
-          left: 0,
-          top: 0,
-          width: 1384,
-          height: 176,
-          backgroundColor: 'rgba(20, 30, 42, 0.48)',
+          borderRadius: 64,
+          border: `6px solid ${MAIMAI_RENDER_THEME.colors.highlight}`,
+          backgroundColor: MAIMAI_RENDER_THEME.colors.accent,
+          flexShrink: 0,
         },
       }),
       createContainerNode({
         style: {
           position: 'relative',
-          width: '100%',
-          height: '100%',
-          padding: 20,
+          width: 690,
+          height: 132,
+          overflow: 'hidden',
           display: 'flex',
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 22,
+          flexDirection: 'column',
+          justifyContent: 'center',
+          borderLeft: `8px solid ${MAIMAI_RENDER_THEME.colors.secondaryAccent}`,
+          backgroundColor: '#edf7fa',
+          flexShrink: 0,
         },
         children: [
           createImageNode({
-            src: avatar,
-            width: 128,
-            height: 128,
+            src: plate,
+            width: 690,
+            height: 132,
             style: {
-              width: 128,
-              height: 128,
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              width: 690,
+              height: 132,
               objectFit: 'cover',
-              borderRadius: 6,
-              border: '4px solid rgba(255,255,255,0.9)',
-              flexShrink: 0,
+              opacity: 0.22,
             },
           }),
           createContainerNode({
             style: {
-              width: 710,
-              height: 128,
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              width: 690,
+              height: 132,
+              backgroundColor: 'rgba(237,247,250,0.72)',
+            },
+          }),
+          createContainerNode({
+            style: {
+              position: 'relative',
+              width: '100%',
+              height: '100%',
+              paddingLeft: 22,
+              paddingRight: 22,
               display: 'flex',
               flexDirection: 'column',
               justifyContent: 'center',
               overflow: 'hidden',
-              color: '#ffffff',
+              color: MAIMAI_RENDER_THEME.colors.text,
             },
             children: [
               createTextNode({
                 text: input.player.nickname || 'maimai player',
                 style: {
                   width: '100%',
-                  height: 46,
+                  height: 44,
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
-                  fontSize: 31,
+                  fontSize: 30,
                   fontWeight: 700,
                   lineHeight: 1.35,
                 },
@@ -456,69 +453,65 @@ async function ratingHeader(
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
-                  fontSize: 18,
+                  fontSize: 16,
                   fontWeight: 700,
-                  color: '#f6f8fb',
+                  color: MAIMAI_RENDER_THEME.colors.mutedText,
                 },
               }),
             ],
           }),
-          createContainerNode({
-            id: 'rating-number-plate',
-            style: {
-              position: 'relative',
-              width: 300,
-              height: 104,
-              paddingLeft: 20,
-              paddingRight: 20,
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'center',
-              borderRadius: 6,
-              backgroundColor: 'rgba(255,255,255,0)',
-              color: '#1e2733',
-              flexShrink: 0,
-              overflow: 'hidden',
-            },
-            children: [
-              createImageNode({
-                className: 'rating-number-plate-asset',
-                src: generatedAssets.numberPlate,
-                width: 300,
-                height: 104,
-                style: { position: 'absolute', left: 0, top: 0, width: 300, height: 104 },
-              }),
-              createTextNode({ text: 'RATING', style: { position: 'relative', fontSize: 14, fontWeight: 700, color: '#657080' } }),
-              createTextNode({ text: String(rating), style: { position: 'relative', fontSize: 48, fontWeight: 700, lineHeight: 1 } }),
-            ],
+        ],
+      }),
+      createContainerNode({
+        id: 'rating-number-plate',
+        style: {
+          width: 300,
+          height: 112,
+          paddingLeft: 20,
+          paddingRight: 20,
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          border: `3px solid ${MAIMAI_RENDER_THEME.colors.highlight}`,
+          backgroundColor: MAIMAI_RENDER_THEME.colors.darkSurface,
+          color: '#ffffff',
+          flexShrink: 0,
+          overflow: 'hidden',
+        },
+        children: [
+          createTextNode({
+            text: 'DELUXE RATING',
+            style: { fontSize: 13, fontWeight: 700, color: '#ffffff' },
           }),
-          createContainerNode({
-            id: 'rating-course-badge',
-            style: {
-              position: 'relative',
-              width: 150,
-              height: 104,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: 6,
-              backgroundColor: 'rgba(32,42,54,0)',
-              color: '#ffffff',
-              flexShrink: 0,
-              overflow: 'hidden',
-            },
-            children: [
-              createImageNode({
-                className: 'dan-badge-asset',
-                src: generatedAssets.danBadge,
-                width: 150,
-                height: 104,
-                style: { position: 'absolute', left: 0, top: 0, width: 150, height: 104 },
-              }),
-              createTextNode({ text: 'DAN', style: { position: 'relative', fontSize: 14, fontWeight: 700, color: '#f4b942' } }),
-              createTextNode({ text: String(input.player.course), style: { position: 'relative', fontSize: 35, fontWeight: 700, lineHeight: 1.1 } }),
-            ],
+          createTextNode({
+            text: String(rating),
+            style: { fontSize: 46, fontWeight: 700, lineHeight: 1.05, color: '#ffe36b' },
+          }),
+        ],
+      }),
+      createContainerNode({
+        id: 'rating-course-badge',
+        style: {
+          width: 150,
+          height: 112,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          border: `3px solid ${MAIMAI_RENDER_THEME.colors.highlight}`,
+          backgroundColor: MAIMAI_RENDER_THEME.colors.darkSurface,
+          color: '#ffffff',
+          flexShrink: 0,
+          overflow: 'hidden',
+        },
+        children: [
+          createTextNode({
+            text: 'DAN',
+            style: { fontSize: 13, fontWeight: 700, color: MAIMAI_RENDER_THEME.colors.highlight },
+          }),
+          createTextNode({
+            text: String(input.player.course),
+            style: { fontSize: 35, fontWeight: 700, lineHeight: 1.1 },
           }),
         ],
       }),
@@ -538,18 +531,10 @@ export async function createRatingRenderPlan(
   const rating = input.rating ?? oldRating + newRating
   const title = input.title
     ?? `[${input.backend}] B${oldCount} ${oldRating} + B${newCount} ${newRating} = ${rating}`
-  const fallbackPlate = resolvePackageAssetPath('fallback/plate.png')
-  const fallbackAvatar = resolvePackageAssetPath('fallback/avatar.png')
-  const [numberPlate, danBadge, statusPlate] = await Promise.all([
-    renderService.loadAsset(resolvePackageAssetPath('generated/rating-number-plate.png'), fallbackPlate),
-    renderService.loadAsset(resolvePackageAssetPath('generated/dan-badge.png'), fallbackAvatar),
-    renderService.loadAsset(resolvePackageAssetPath('generated/status-plate.png'), fallbackPlate),
-  ])
-  const generatedAssets = { numberPlate, danBadge, statusPlate }
   const [header, oldSection, newSection] = await Promise.all([
-    ratingHeader(input, title, rating, generatedAssets, renderService, data),
-    ratingSection(input.oldLabel ?? `BEST ${oldCount}`, 'old', oldCount, input.oldRecords, generatedAssets, renderService, data),
-    ratingSection(input.newLabel ?? `NEW ${newCount}`, 'new', newCount, input.newRecords, generatedAssets, renderService, data),
+    ratingHeader(input, title, rating, renderService, data),
+    ratingSection(input.oldLabel ?? `OLD CHARTS · B${oldCount}`, 'old', oldCount, input.oldRecords, renderService, data),
+    ratingSection(input.newLabel ?? `NEW CHARTS · B${newCount}`, 'new', newCount, input.newRecords, renderService, data),
   ])
 
   return {

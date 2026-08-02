@@ -32,7 +32,7 @@ export function registerRecordCommands(
   dependencies: CoreCommandDependencies,
 ) {
   return [ctx.command('mai.progress <filter:string> [target:text]', '查询文字进度')
-    .shortcut(/^\/mai\s+(.+?)进度(?:\s+(.*))?$/, { args: ['$1', '$2'] })
+    .alias('mai.进度')
     .action(commandAction(async ({ session }, filterText, target = '') => {
       const filters = parseComboQuery(filterText)
       if (!filters) {

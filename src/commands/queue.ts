@@ -276,12 +276,12 @@ export function registerQueueCommands(
   dependencies: QueueCommandDependencies,
 ): QueueCommandRegistration {
   const queryCommand = ctx.command('mai.queue.query [name:string]', '查询机厅人数')
-    .shortcut(/^\/mai\s+排卡管理\s+查询人数(?:\s+(\S+))?$/u, { args: ['$1'] })
+    .alias('.查询人数')
     .action(commandAction(async ({ session }, name = '') => {
       await queryQueue(session, dependencies, name)
     }))
   const command = ctx.command('mai.queue [input:text]', '管理机厅排卡')
-    .shortcut(/^\/mai\s+排卡管理(?:\s+(.*))?$/u, { args: ['$1'] })
+    .alias('mai.排卡管理')
     .action(commandAction(async ({ session }, input = '') => {
       await manageQueue(session, dependencies, input)
     }))

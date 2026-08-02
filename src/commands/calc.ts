@@ -45,7 +45,7 @@ export function registerCalcCommands(
   dependencies: CoreCommandDependencies,
 ) {
   return [ctx.command('mai.score-line <input:text>', '计算目标达成率允许的失分')
-    .shortcut(/^\/mai\s+分数线(?:\s+(.*))?$/, { args: ['$1'] })
+    .alias('mai.分数线')
     .action(commandAction(async ({ session }, raw = '') => {
       const parsed = parseScoreLine(raw)
       if (!parsed) {

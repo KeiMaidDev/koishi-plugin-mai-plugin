@@ -117,7 +117,7 @@ export function registerUpdateCommands(
 ) {
   return [
     ctx.command('mai.bind-lxns', '绑定落雪 OAuth')
-      .shortcut(/^\/mai\s+(?:绑定落雪|bind-lxns)$/iu)
+      .alias('mai.绑定落雪')
       .action(commandAction(async ({ session }) => {
         try {
           const url = await dependencies.updateService.beginLxnsOAuth(
@@ -135,7 +135,7 @@ export function registerUpdateCommands(
         }
       })),
     ctx.command('mai.unbind-lxns', '解绑落雪 OAuth')
-      .shortcut(/^\/mai\s+(?:解绑落雪|unbind-lxns)$/iu)
+      .alias('mai.解绑落雪')
       .action(commandAction(async ({ session }) => {
         try {
           await dependencies.updateService.unbindLxns(session.userId)
@@ -152,7 +152,7 @@ export function registerUpdateCommands(
         }
       })),
     ctx.command('mai.unbind-diving-fish', '解绑水鱼成绩导入 Token')
-      .shortcut(/^\/mai\s+(?:解绑水鱼|unbind-diving-fish)$/iu)
+      .alias('mai.解绑水鱼')
       .action(commandAction(async ({ session }) => {
         try {
           await dependencies.updateService.unbindDivingFish(session.userId)
@@ -166,7 +166,7 @@ export function registerUpdateCommands(
         }
       })),
     ctx.command('mai.update', '更新水鱼成绩')
-      .shortcut(/^\/mai\s+(?:更新|导)$/u)
+      .alias('mai.更新', 'mai.导')
       .action(commandAction(async ({ session }) => {
         try {
           const url = await dependencies.updateService.beginDivingFishUpdate(
@@ -182,7 +182,7 @@ export function registerUpdateCommands(
         }
       })),
     ctx.command('mai.bind-diving-fish <token:text>', '绑定水鱼成绩导入 Token')
-      .shortcut(/^\/mai\s+绑定水鱼(?:\s+(.*))?$/u, { args: ['$1'] })
+      .alias('mai.绑定水鱼')
       .action(commandAction(async ({ session }, token = '') => {
         try {
           await dependencies.updateService.bindDivingFishToken(session.userId, token)

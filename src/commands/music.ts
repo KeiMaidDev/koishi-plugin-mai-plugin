@@ -43,17 +43,6 @@ const userRegexWorkerSemaphore = new Semaphore(2, 4)
 
 export const REGEX_WORKER_BUSY_MESSAGE = '正则搜索繁忙，请稍后重试。'
 
-const difficultyTokens = [
-  '绿谱', '绿', '黄谱', '黄', '红谱', '红', '紫谱', '紫', '白谱', '白',
-  'Basic', 'Advanced', 'Expert', 'Master', 'ReMaster',
-] as const
-
-const directIdPattern = /^\/mai\s+id(\d+)$/i
-const difficultyIdPattern = new RegExp(
-  `^/mai\\s+(${difficultyTokens.join('|')})\\s*id(\\d+)$`,
-  'i',
-)
-
 type MusicSearchResult = MusicInfo | ChartInfo
 
 function resolveDifficulty(token: string | undefined) {
@@ -146,7 +135,7 @@ function musicKeyboard(music: MusicInfo) {
     createQqButtonRow(charts.map((chart, columnIndex) => createQqButton(
       `music-level-${rowIndex}-${columnIndex}`,
       difficultyLabel(chart.difficulty),
-      createQqCommandAction(`/mai ${chart.difficulty.brief}id${music.id}`, { enter: true }),
+      createQqCommandAction(`/mai id ${music.id} --difficulty ${chart.difficulty.brief}`, { enter: true }),
     )))
   ))
   rows.push(createQqButtonRow([
@@ -351,8 +340,8 @@ function resultMarkdown(result: MusicSearchResult, coverUrl: string | null) {
     ? `${result.difficulty.brief}${music.id}. ${music.name}`
     : `${music.id}. ${music.name}`
   const command = isChart(result)
-    ? `/mai ${result.difficulty.brief}id${music.id}`
-    : `/mai id${music.id}`
+    ? `/mai id ${music.id} --difficulty ${result.difficulty.brief}`
+    : `/mai id ${music.id}`
   const preview = coverUrl ? `${jacketMarkdown(coverUrl, 20, 'preview')} ` : ''
   return `${preview}${createInlineCommandLink(label, command)}`
 }
@@ -555,16 +544,16 @@ async function selectSingleMusic(
   return (await dependencies.aliasService.search(query.trim()))[0]
 }
 
-function registerTextShortcut(
+function registerTextCommand(
   ctx: Context,
   definition: string,
   description: string,
-  pattern: RegExp,
+  aliases: readonly string[],
   action: (session: ActiveCommandSession, raw: string) => Promise<void>,
   config?: Command.Config,
 ) {
   return ctx.command(definition, description, config)
-    .shortcut(pattern, { args: ['$1'] })
+    .alias(...aliases)
     .action(commandAction(async ({ session }, raw = '') => {
       await action(session, raw)
     }))
@@ -578,11 +567,6 @@ export function registerMusicCommands(
 
   commands.push(ctx.command('mai.id <id:posint>', '按曲目 ID 查询舞萌歌曲')
     .option('difficulty', '-d <difficulty:string> 指定谱面难度')
-    .shortcut(directIdPattern, { args: ['$1'] })
-    .shortcut(difficultyIdPattern, {
-      args: ['$2'],
-      options: { difficulty: '$1' },
-    })
     .action(commandAction(async ({ session, options }, id) => {
       const music = dependencies.data.musics.get(id)
       if (!music) {
@@ -604,11 +588,11 @@ export function registerMusicCommands(
       await replyMusicDetails(session, dependencies, music, chart)
     })))
 
-  commands.push(registerTextShortcut(
+  commands.push(registerTextCommand(
     ctx,
     'mai.random [query:text]',
     '按随心配条件随机歌曲',
-    /^\/mai\s+随个(?:\s+(.*))?$/,
+    ['mai.随个'],
     async (session, raw) => {
       const filters = raw.trim() ? parseComboQuery(raw) : []
       const musics = raw.trim()
@@ -624,11 +608,11 @@ export function registerMusicCommands(
     },
   ))
 
-  commands.push(registerTextShortcut(
+  commands.push(registerTextCommand(
     ctx,
     'mai.search <query:text>',
     '按曲名或别名查歌',
-    /^\/mai\s+查歌(?:\s+(.*))?$/,
+    ['mai.查歌'],
     async (session, raw) => {
       const paged = parsePagedInput(raw)
       if (!paged) {
@@ -646,11 +630,11 @@ export function registerMusicCommands(
     },
   ))
 
-  commands.push(registerTextShortcut(
+  commands.push(registerTextCommand(
     ctx,
     'mai.level-search <range:text>',
     '按谱面定数查歌',
-    /^\/mai\s+定数查歌(?:\s+(.*))?$/,
+    ['mai.定数查歌'],
     async (session, raw) => {
       const paged = parsePagedInput(raw)
       const range = paged && parseLevelRange(paged.input)
@@ -675,11 +659,11 @@ export function registerMusicCommands(
     },
   ))
 
-  commands.push(registerTextShortcut(
+  commands.push(registerTextCommand(
     ctx,
     'mai.fit-level-search <range:text>',
     '按拟合定数查歌',
-    /^\/mai\s+拟合定数查歌(?:\s+(.*))?$/,
+    ['mai.拟合定数查歌'],
     async (session, raw) => {
       const paged = parsePagedInput(raw)
       const range = paged && parseLevelRange(paged.input)
@@ -708,7 +692,7 @@ export function registerMusicCommands(
     {
       definition: 'mai.designer-search <query:text>',
       description: '按谱师查歌',
-      pattern: /^\/mai\s+谱师查歌(?:\s+(.*))?$/,
+      aliases: ['mai.谱师查歌'],
       command: '谱师查歌',
       search: (query: string) => [...dependencies.data.musics.values()].flatMap(music => music.charts)
         .filter(chart => chart.notesDesigner.toLocaleLowerCase().includes(query.toLocaleLowerCase())),
@@ -716,7 +700,7 @@ export function registerMusicCommands(
     {
       definition: 'mai.version-search <query:text>',
       description: '按版本查歌',
-      pattern: /^\/mai\s+版本查歌(?:\s+(.*))?$/,
+      aliases: ['mai.版本查歌'],
       command: '版本查歌',
       search: (query: string) => [...dependencies.data.musics.values()]
         .filter(music => music.version.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())),
@@ -724,18 +708,18 @@ export function registerMusicCommands(
     {
       definition: 'mai.artist-search <query:text>',
       description: '按曲师查歌',
-      pattern: /^\/mai\s+曲师查歌(?:\s+(.*))?$/,
+      aliases: ['mai.曲师查歌'],
       command: '曲师查歌',
       search: (query: string) => [...dependencies.data.musics.values()]
         .filter(music => music.artist.toLocaleLowerCase().includes(query.toLocaleLowerCase())),
     },
   ] as const
   for (const search of propertySearches) {
-    commands.push(registerTextShortcut(
+    commands.push(registerTextCommand(
       ctx,
       search.definition,
       search.description,
-      search.pattern,
+      search.aliases,
       async (session, raw) => {
         const paged = parsePagedInput(raw)
         if (!paged) {
@@ -753,11 +737,11 @@ export function registerMusicCommands(
     ))
   }
 
-  commands.push(registerTextShortcut(
+  commands.push(registerTextCommand(
     ctx,
     'mai.regex-search <pattern:text>',
     '按安全正则表达式查歌',
-    /^\/mai\s+正则查歌(?:\s+(.*))?$/,
+    ['mai.正则查歌'],
     async (session, raw) => {
       const paged = parsePagedInput(raw)
       if (!paged) {
@@ -798,11 +782,11 @@ export function registerMusicCommands(
     },
   ))
 
-  commands.push(registerTextShortcut(
+  commands.push(registerTextCommand(
     ctx,
     'mai.bpm-search <query:text>',
     '按 BPM 查歌',
-    /^\/mai\s+(?:BPM|bpm)查歌(?:\s+(.*))?$/,
+    ['mai.bpm查歌'],
     async (session, raw) => {
       const paged = parsePagedInput(raw)
       const [bpmText, legacyPageText] = paged?.input.split(/\s+/, 2) ?? []
@@ -825,11 +809,11 @@ export function registerMusicCommands(
     },
   ))
 
-  commands.push(registerTextShortcut(
+  commands.push(registerTextCommand(
     ctx,
     'mai.combo-search <query:text>',
     '按随心配组合条件查歌',
-    /^\/mai\s+搜索(?:\s+(.*))?$/,
+    ['mai.搜索'],
     async (session, raw) => {
       const paged = parsePagedInput(raw)
       const filters = paged && parseComboQuery(paged.input)
@@ -848,11 +832,11 @@ export function registerMusicCommands(
     },
   ))
 
-  commands.push(registerTextShortcut(
+  commands.push(registerTextCommand(
     ctx,
     'mai.alias-add <input:text>',
     '添加或投票歌曲别名',
-    /^\/mai\s+添加别名(?:\s+(.*))?$/,
+    ['mai.添加别名'],
     async (session, raw) => {
       const [query, ...aliasParts] = raw.trim().split(/\s+/)
       const alias = aliasParts.join(' ').trim()
@@ -884,11 +868,11 @@ export function registerMusicCommands(
     },
   ))
 
-  commands.push(registerTextShortcut(
+  commands.push(registerTextCommand(
     ctx,
     'mai.alias-remove <input:text>',
     '删除歌曲别名（管理员）',
-    /^\/mai\s+删除别名(?:\s+(.*))?$/,
+    ['mai.删除别名'],
     async (session, raw) => {
       const [query, ...aliasParts] = raw.trim().split(/\s+/)
       const alias = aliasParts.join(' ').trim()
@@ -917,7 +901,7 @@ export function registerMusicCommands(
   ))
 
   commands.push(ctx.command('mai.daily', '生成稳定的今日舞萌推荐')
-    .shortcut(/^\/mai\s+今日舞萌$/)
+    .alias('mai.今日舞萌')
     .action(commandAction(async ({ session }) => {
       const musics = [...dependencies.data.musics.values()]
       if (!musics.length) {
@@ -936,11 +920,11 @@ export function registerMusicCommands(
       )
     })))
 
-  commands.push(registerTextShortcut(
+  commands.push(registerTextCommand(
     ctx,
     'mai.preview <query:text>',
     '发送本地歌曲预览',
-    /^\/mai\s+预览(?:\s+(.*))?$/,
+    ['mai.预览'],
     async (session, raw) => {
       const music = raw.trim() ? await selectSingleMusic(dependencies, raw) : undefined
       if (!music) {

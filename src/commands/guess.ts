@@ -21,11 +21,6 @@ import {
 
 export const GUESS_SETTING_KEY = 'guess'
 
-const classicalStartPattern = /^猜歌$/u
-const openingStartPattern = /^(?:舞萌开字母|出你字母)$/u
-const disablePattern = /^(?:禁用猜歌|禁止猜歌|关闭猜歌)$/u
-const enablePattern = /^(?:启用猜歌|允许猜歌|打开猜歌)$/u
-
 type GuessServicePort = Pick<
   GuessService,
   'startClassical' | 'startOpening' | 'handleMessage' | 'hasActiveGame' | 'dispose'
@@ -196,23 +191,6 @@ export function createGuessMiddleware(
     if (!content || content.startsWith('/')) return next()
     const activeSession = session as ActiveCommandSession
 
-    if (disablePattern.test(content)) {
-      await setGuessEnabled(activeSession, dependencies, false)
-      return
-    }
-    if (enablePattern.test(content)) {
-      await setGuessEnabled(activeSession, dependencies, true)
-      return
-    }
-    if (classicalStartPattern.test(content)) {
-      await startGame(activeSession, dependencies, 'classical')
-      return
-    }
-    if (openingStartPattern.test(content)) {
-      await startGame(activeSession, dependencies, 'opening')
-      return
-    }
-
     const contextId = guessContextId(session)
     if (!dependencies.guessService.hasActiveGame(contextId)) return next()
     const result = await handleActiveMessage(activeSession, dependencies)
@@ -226,12 +204,12 @@ export function registerGuessCommands(
 ): GuessCommandRegistration {
   const commands = [
     ctx.command('mai.guess', '开始经典舞萌猜歌')
-      .shortcut(/^\/mai\s+猜歌$/u)
+      .alias('mai.猜歌')
       .action(commandAction(async ({ session }) => {
         await startGame(session, dependencies, 'classical')
       })),
     ctx.command('mai.opening', '开始舞萌开字母')
-      .shortcut(/^\/mai\s+(?:舞萌开字母|出你字母)$/u)
+      .alias('mai.舞萌开字母', 'mai.出你字母')
       .action(commandAction(async ({ session }) => {
         await startGame(session, dependencies, 'opening')
       })),
@@ -239,7 +217,7 @@ export function registerGuessCommands(
       authority: 4,
       permissions: ['authority:0'],
     })
-      .shortcut(/^\/mai\s+(?:禁用猜歌|禁止猜歌|关闭猜歌)$/u)
+      .alias('mai.禁用猜歌', 'mai.禁止猜歌', 'mai.关闭猜歌')
       .action(commandAction(async ({ session }) => {
         await setGuessEnabled(session, dependencies, false)
       })),
@@ -247,7 +225,7 @@ export function registerGuessCommands(
       authority: 4,
       permissions: ['authority:0'],
     })
-      .shortcut(/^\/mai\s+(?:启用猜歌|允许猜歌|打开猜歌)$/u)
+      .alias('mai.启用猜歌', 'mai.允许猜歌', 'mai.打开猜歌')
       .action(commandAction(async ({ session }) => {
         await setGuessEnabled(session, dependencies, true)
       })),

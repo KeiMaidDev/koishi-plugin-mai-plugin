@@ -82,16 +82,18 @@ function levelStatus(text: string) {
     className: 'level-status-icon',
     attributes: { 'data-complete': String(complete) },
     style: {
-      width: 54,
-      height: 25,
+      position: 'absolute',
+      left: 0,
+      bottom: 0,
+      width: '100%',
+      height: 27,
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      borderRadius: 4,
-      backgroundColor: complete ? '#26313e' : '#a7aeb8',
+      backgroundColor: complete ? 'rgba(38,49,60,0.88)' : 'rgba(101,115,132,0.82)',
       color: '#ffffff',
     },
-    children: [createTextNode({ text, style: { fontSize: 11, fontWeight: 700 } })],
+    children: [createTextNode({ text, style: { fontSize: 12, fontWeight: 700 } })],
   })
 }
 
@@ -115,72 +117,64 @@ async function levelTile(
       'data-music-id': String(chart.music.id),
     },
     style: {
-      width: 142,
-      height: 104,
-      padding: 4,
+      position: 'relative',
+      width: 132,
+      height: 132,
       display: 'flex',
-      flexDirection: 'row',
-      gap: 6,
       overflow: 'hidden',
-      borderRadius: 5,
-      backgroundColor: color,
+      border: `4px solid ${color}`,
+      backgroundColor: MAIMAI_RENDER_THEME.colors.surface,
       flexShrink: 0,
     },
     children: [
       createImageNode({
         className: 'level-cover',
         src: cover,
-        width: 72,
-        height: 72,
+        width: 124,
+        height: 124,
         style: {
-          width: 72,
-          height: 72,
-          marginTop: 12,
+          width: 124,
+          height: 124,
           objectFit: 'cover',
-          borderRadius: 3,
           flexShrink: 0,
         },
       }),
       createContainerNode({
         style: {
-          width: 56,
-          height: 96,
-          paddingTop: 7,
-          paddingBottom: 7,
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          width: '100%',
+          height: 24,
+          paddingLeft: 5,
+          paddingRight: 5,
           display: 'flex',
-          flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'space-between',
-          borderRadius: 3,
-          backgroundColor: 'rgba(255,255,255,0.94)',
+          backgroundColor: 'rgba(38,49,60,0.82)',
+          color: '#ffffff',
           overflow: 'hidden',
         },
         children: [
           createTextNode({
-            text: `ID ${chart.music.id}`,
+            text: `${chart.music.type.value} · ${chart.music.id}`,
             style: {
-              width: 52,
-              height: 17,
+              width: 82,
+              height: 15,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
-              textAlign: 'center',
               fontSize: 9,
               fontWeight: 700,
-              color: '#394453',
             },
           }),
           createTextNode({
-            text: chart.music.type.value,
-            style: { fontSize: 12, fontWeight: 700, color: '#137e91' },
+            text: `${chart.level} · ${chart.levelValue.toFixed(1)}`,
+            style: { fontSize: 9, fontWeight: 700 },
           }),
-          createTextNode({
-            text: chart.level,
-            style: { fontSize: 15, fontWeight: 700, color },
-          }),
-          levelStatus(completion),
         ],
       }),
+      levelStatus(completion),
     ],
   })
 }
@@ -214,13 +208,13 @@ function progressItem(
     className: 'level-progress-item',
     attributes: { 'data-difficulty': difficulty.name },
     style: {
-      height: 58,
+      height: 72,
       flex: 1,
       minWidth: 0,
       display: 'flex',
       flexDirection: 'column',
       justifyContent: 'center',
-      gap: 6,
+      gap: 8,
       overflow: 'hidden',
     },
     children: [
@@ -234,9 +228,8 @@ function progressItem(
       createContainerNode({
         style: {
           width: '100%',
-          height: 12,
+          height: 10,
           overflow: 'hidden',
-          borderRadius: 3,
           backgroundColor: '#dfe4ea',
         },
         children: [createContainerNode({
@@ -254,33 +247,42 @@ function levelHeader(input: LevelRenderInput) {
     id: 'level-header',
     style: {
       width: '100%',
-      height: input.showProgress ? 150 : 82,
+      height: input.showProgress ? 126 : 82,
       paddingLeft: 22,
       paddingRight: 22,
       display: 'flex',
-      flexDirection: 'column',
+      flexDirection: 'row',
+      alignItems: 'center',
       justifyContent: 'center',
-      gap: 12,
+      gap: 24,
       overflow: 'hidden',
-      borderLeft: '8px solid #00a8a8',
-      backgroundColor: '#ffffff',
+      borderTop: `8px solid ${MAIMAI_DIFFICULTY_COLORS.Master}`,
+      backgroundColor: MAIMAI_RENDER_THEME.colors.surface,
     },
     children: [
       createTextNode({
         text: input.title,
         style: {
-          width: '100%',
-          height: 38,
+          width: input.showProgress ? 290 : '100%',
+          height: 44,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
-          fontSize: 27,
+          fontSize: 26,
           fontWeight: 700,
+          flexShrink: 0,
         },
       }),
       ...(input.showProgress ? [createContainerNode({
         id: 'level-progress',
-        style: { width: '100%', height: 58, display: 'flex', flexDirection: 'row', gap: 18 },
+        style: {
+          height: 72,
+          flex: 1,
+          minWidth: 0,
+          display: 'flex',
+          flexDirection: 'row',
+          gap: 18,
+        },
         children: difficulties.map(difficulty => progressItem(
           difficulty,
           input.progress?.[difficulty.name as MaimaiDifficultyName],
@@ -306,24 +308,34 @@ async function levelGroup(
     attributes: { 'data-level': group.label, 'data-rows': String(rowCount) },
     style: {
       width: '100%',
-      height: 42 + rowCount * 104 + (rowCount - 1) * 10,
+      height: rowCount * 132 + (rowCount - 1) * 10,
       display: 'flex',
-      flexDirection: 'column',
-      gap: 8,
+      flexDirection: 'row',
+      gap: 10,
       overflow: 'hidden',
     },
     children: [
       createContainerNode({
-        style: { height: 34, display: 'flex', alignItems: 'center', borderBottom: '2px solid #cfd5dd' },
+        style: {
+          width: 96,
+          height: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          border: `2px solid ${MAIMAI_DIFFICULTY_COLORS.Master}`,
+          backgroundColor: MAIMAI_RENDER_THEME.colors.surface,
+          color: MAIMAI_DIFFICULTY_COLORS.Master,
+          flexShrink: 0,
+        },
         children: [createTextNode({
           text: group.label,
-          style: { fontSize: 22, fontWeight: 700, color: '#303b49' },
+          style: { fontSize: 22, fontWeight: 700 },
         })],
       }),
       createContainerNode({
         className: 'level-group-grid',
         style: {
-          width: '100%',
+          width: 1126,
           display: 'flex',
           flexDirection: 'row',
           flexWrap: 'wrap',
@@ -345,10 +357,10 @@ export async function createLevelRenderPlan(
   const groups = await Promise.all(input.groups.map(group =>
     levelGroup(group, requirement, input.records, renderService, data),
   ))
-  const headerHeight = input.showProgress ? 150 : 82
+  const headerHeight = input.showProgress ? 126 : 82
   const groupsHeight = input.groups.reduce((sum, group) => {
     const rows = Math.max(1, Math.ceil(group.charts.length / 8))
-    return sum + 42 + rows * 104 + (rows - 1) * 10
+    return sum + rows * 132 + (rows - 1) * 10
   }, 0)
   const height = Math.max(
     LEVEL_TEMPLATE_MIN_HEIGHT,

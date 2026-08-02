@@ -160,7 +160,7 @@ export function registerSettingsCommands(
   const commands = []
 
   commands.push(ctx.command('mai.bind <qq:string>', '绑定查询使用的 QQ 号')
-    .shortcut(/^(?:\/mai\s+(?:bind|绑定)|\/bind)(?:\s+(.*))?$/i, { args: ['$1'] })
+    .alias('mai.绑定')
     .action(commandAction(async ({ session }, qq = '') => {
       const normalized = qq.trim()
       if (!/^\d{5,20}$/.test(normalized)) {
@@ -192,9 +192,11 @@ export function registerSettingsCommands(
     })))
 
   commands.push(ctx.command('mai.provider <provider:string>', '设置成绩查询后端')
-    .shortcut(/^\/mai\s+设置查分器(?:\s+(.*))?$/, { args: ['$1'] })
-    .shortcut(/^\/mai\s+(?:设置水鱼|水鱼)$/, { args: ['diving-fish'] })
-    .shortcut(/^\/mai\s+(?:设置落雪|落雪)$/, { args: ['lxns'] })
+    .alias('mai.设置查分器')
+    .alias('mai.设置水鱼', { args: ['diving-fish'] })
+    .alias('mai.水鱼', { args: ['diving-fish'] })
+    .alias('mai.设置落雪', { args: ['lxns'] })
+    .alias('mai.落雪', { args: ['lxns'] })
     .action(commandAction(async ({ session }, raw = '') => {
       const provider = providerMode(raw)
       if (!provider) {
@@ -213,9 +215,12 @@ export function registerSettingsCommands(
     })))
 
   commands.push(ctx.command('mai.compatibility <input:text>', '切换兼容模式')
-    .shortcut(/^\/mai\s+((?:兼容模式(?:\s+.*)?|取消兼容模式|关闭兼容模式|禁用兼容模式|打开兼容模式|启用兼容模式))$/, {
-      args: ['$1'],
-    })
+    .alias('mai.兼容模式', { args: ['兼容模式'] })
+    .alias('mai.取消兼容模式', { args: ['取消兼容模式'] })
+    .alias('mai.关闭兼容模式', { args: ['关闭兼容模式'] })
+    .alias('mai.禁用兼容模式', { args: ['禁用兼容模式'] })
+    .alias('mai.打开兼容模式', { args: ['打开兼容模式'] })
+    .alias('mai.启用兼容模式', { args: ['启用兼容模式'] })
     .action(commandAction(async ({ session }, raw) => {
       const disabled = /^(?:取消|关闭|禁用)兼容模式$/.test(raw)
         || /^兼容模式\s+(?:取消|关闭|禁用)$/.test(raw)
@@ -233,7 +238,7 @@ export function registerSettingsCommands(
     })))
 
   commands.push(ctx.command('mai.avatar <value:text>', '设置舞萌头像')
-    .shortcut(/^\/mai\s+设置头像(?:\s+(.*))?$/, { args: ['$1'] })
+    .alias('mai.设置头像')
     .action(commandAction(async ({ session }, value = '') => {
       try {
         await dependencies.settingService.setAvatar(session.userId, value.trim())
@@ -244,7 +249,7 @@ export function registerSettingsCommands(
     })))
 
   commands.push(ctx.command('mai.plate <value:text>', '设置舞萌牌子或姓名框')
-    .shortcut(/^\/mai\s+(?:设置牌子|设置姓名框)(?:\s+(.*))?$/, { args: ['$1'] })
+    .alias('mai.设置牌子', 'mai.设置姓名框')
     .action(commandAction(async ({ session }, value = '') => {
       try {
         await dependencies.settingService.setPlate(session.userId, value.trim())
@@ -255,9 +260,7 @@ export function registerSettingsCommands(
     })))
 
   commands.push(ctx.command('mai.query-settings', '显示舞萌成绩图设置')
-    .shortcut(/^\/mai\s+查分设置$/)
-    .shortcut(/^\/mai\s+设置mai$/i)
-    .shortcut(/^\/mai\s+设置b50$/i)
+    .alias('mai.查分设置', 'mai.设置mai', 'mai.设置b50')
     .action(commandAction(async ({ session }) => {
       if (!dependencies.updateService) {
         await settingFailure(session, dependencies, new Error('Update service is unavailable.'))
@@ -276,7 +279,7 @@ export function registerSettingsCommands(
     })))
 
   commands.push(ctx.command('mai.default', '将舞萌设为默认音游')
-    .shortcut(/^\/mai\s+(?:默认|设为默认)$/)
+    .alias('mai.默认', 'mai.设为默认')
     .action(commandAction(async ({ session }) => {
       try {
         await dependencies.settingService.setDefaultGame(session.userId, 'maimai')

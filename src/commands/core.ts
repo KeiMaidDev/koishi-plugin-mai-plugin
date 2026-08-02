@@ -1,4 +1,4 @@
-import type { Command, Context, Middleware, Session } from 'koishi'
+import type { Command, Context, Session } from 'koishi'
 import { registerCalcCommands } from './calc'
 import { registerGuessCommands } from './guess'
 import { registerHelpCommand } from './help'
@@ -163,36 +163,11 @@ export function resolveCompatibilityExecution(content: string) {
 export function resolvePendingCommandExecution(content: string) {
   const normalized = content.trim()
   const legacy = normalized.match(/^\/mai(?:\s+(.*))?$/i)
-  if (legacy) return resolveCompatibilityExecution(legacy[1] ?? 'mai')
-  return resolveCompatibilityExecution(normalized)
-}
-
-export function createCompatibilityMiddleware(
-  dependencies: CoreCommandDependencies,
-): Middleware {
-  const supportedPlatforms = new Set(
-    dependencies.compatibilityPlatforms ?? ['qq', 'onebot', 'mock'],
-  )
-  return async (session, next) => {
-    if (!supportedPlatforms.has(session.platform)) return next()
-    if (!session.userId || session.userId === session.selfId || session.event.user?.isBot) {
-      return next()
-    }
-    const content = session.content?.trim() ?? ''
-    if (!content || content.startsWith('/')) {
-      return next()
-    }
-    const execution = resolveCompatibilityExecution(content)
-    if (!execution) return next()
-    let defaultGame: string
-    try {
-      defaultGame = await dependencies.settingService.getDefaultGame(session.userId)
-    } catch {
-      return next()
-    }
-    if (defaultGame !== 'maimai') return next()
-    await session.execute(execution)
+  if (legacy) {
+    return resolveCompatibilityExecution(legacy[1] ?? 'mai')
+      ?? normalized.slice(1)
   }
+  return resolveCompatibilityExecution(normalized)
 }
 
 export interface CoreCommandRegistration {
@@ -260,7 +235,6 @@ export function registerCoreCommands(
     ...(queueRegistration?.commands ?? []),
     ...regularCommands,
   ]
-  const disposeMiddleware = ctx.middleware(createCompatibilityMiddleware(commandDependencies))
   const disposeCallbacks = ctx.on('interaction/button', dispatchQqCommandCallback)
   let disposed = false
 
@@ -269,7 +243,6 @@ export function registerCoreCommands(
     async dispose() {
       if (disposed) return
       disposed = true
-      disposeMiddleware()
       disposeCallbacks()
       for (const command of [...regularCommands].reverse()) command.dispose()
       await queueRegistration?.dispose()
